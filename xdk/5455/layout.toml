@@ -1,0 +1,57 @@
+# The XDK 5455 layout, read out of the beta's debug XBE (its D3D8I code is
+# the plain XDK library, so the fields are visible) and the beta's linker map.
+#
+# The device is at 0x3625c0 in the debug XBE, and the fields below are the
+# offsets the D3D8 library itself uses.
+[layout]
+CDevice_Push              = 0x0     # every SetRenderState_* writes it, compares with +4
+CDevice_PushThreshold     = 0x4
+CDevice_BaseVertex        = 0x1C    # D3DDevice_SetIndices stores BaseVertexIndex
+CDevice_IndexBuffer       = 0x388   # D3DDevice_SetIndices stores the buffer
+CDevice_Time              = 0x2C    # D3D_SetFence pushes it
+CDevice_Flags             = 0x8     # Direct3D_CreateDevice ors the behaviour flags into it
+CDevice_PixelShader       = 0x36C   # D3DDevice_SetPixelShader stores the handle
+CDevice_VertexShader      = 0x370   # D3DDevice_SetPixelShader tests it
+CDevice_SuperSampleX      = 0x544   # the viewport push scales viewport X by it
+CDevice_SuperSampleY      = 0x548
+CDevice_Transforms        = 0x840   # D3DDevice_SetTransform copies 16 dwords to +0x840 + type * 64
+CDevice_Textures          = 0xB68   # D3DDevice_SetTexture reads and stores [stage]
+CDevice_Palettes          = 0xB78   # D3DDevice_SetPalette reads and stores [stage]
+CDevice_AutoDepth         = 0x154C  # the frame buffer init stores the depth buffer
+CDevice_RenderTarget      = 0x15E4  # D3DDevice_GetRenderTarget2 returns it
+CDevice_Depth             = 0x15E8  # D3DDevice_GetDepthStencilSurface2 returns it
+CDevice_BackBufferScale   = 0x15F0  # the frame buffer init stores the X scale
+CDevice_BackBuffer        = 0x15F4  # D3DDevice_GetBackBuffer2 returns it for index 0
+CDevice_FrontBuffer       = 0x15F8  # D3DDevice_GetBackBuffer2 returns it for index -1
+CDevice_SwapCount         = 0x2058  # D3DDevice_Swap increments it
+# the rest: not read yet, the 4831 values as a first guess
+CDevice_ZScale            = 0x510
+CDevice_ScreenSpaceOffset = 0x530
+CDevice_Viewport          = 0xA90
+CDevice_Size              = 0x2C30
+CDevice_VBlankCallback    = 0x2550
+CDevice_VBlankEvent       = 0x2554
+CDevice_DisplayFlags      = 0x2574
+CDevice_VBlankCount       = 0x2580
+CDevice_Field             = 0x2590
+CDevice_GammaRamps        = 0x2594
+CDevice_GammaPending      = 0x2BF4
+# the dirty flags the texture state sets (D3DDevice_SetPixelShader ors 0x4800)
+DirtyFlags_Texture        = 0x4800
+# the effects image (the DSPImage section): two skip counts, then the effect table
+EffectsImage_Skip0        = 0x804  # a dword count the image adds to the descriptor's place
+EffectsImage_Skip1        = 0x80C  # and another one
+EffectsImage_Desc         = 0x818  # the effect table is at 0x818 + (Skip0 + Skip1) * 4
+# XAPI XPP device type record: the game passes its address to XInputOpen
+XPP_Current               = 0x0    # the ports with a controller in them
+XPP_Changed               = 0x4    # the ports whose state changed since the last poll
+XPP_Previous              = 0x8    # the state before the last poll
+# the DirectSound stream object: its two vtable pointers
+CDirectSoundStream_Vtable = 0x0    # the CDirectSoundStream vtable
+CDirectSoundStream_Vtable2 = 0x4   # the XMediaObject vtable
+# the per-stage texture state array: [stage * 4 + type] dwords
+TextureState_Stage        = 4
+# the stream table: [n * 12], the stride at +0, the buffer at +8
+Stream_Size               = 12
+Stream_Stride             = 0x0
+Stream_Buffer             = 0x8
