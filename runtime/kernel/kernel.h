@@ -227,6 +227,12 @@ const char* ExportName(uint32_t ordinal);
 bool HasExport(uint32_t ordinal);       // implemented as a function or data
 const char* OrdinalName(uint32_t ordinal);  // public name, "?" past the table
 
+// The exports of the libraries the image imports from, like xbdm.dll: the
+// library's name and the export's ordinal in it. Their addresses go into the
+// image's import tables, so a call through one reaches the host's version.
+void RegisterLibraryExport(const char* library, uint32_t ordinal, const char* name, KernelFn fn);
+uint32_t LibraryExportAddress(const char* library, uint32_t ordinal);  // 0 when the host has none
+
 // guest kernel variables updated by the host
 extern uint32_t g_tick_count_va;
 extern uint32_t g_launch_data_page_va;

@@ -132,6 +132,27 @@ bool Boot(std::vector<uint8_t> xbe, const std::string& xbe_name, const std::stri
     }
     LOGI("boot: kernel imports resolved, %u missing", missing);
 
+    // The image imports from libraries of its own as well as from the kernel.
+    // Each library has an import table of its own, whose entries hold
+    // 0x80000000 | the export's ordinal in that library. The host replaces
+    // those entries with the addresses of its own implementations.
+    for (const auto& lib : img.imports) {
+        uint32_t missing_lib = 0;
+        for (uint32_t slot = lib.first_thunk;; slot += 4) {
+            uint32_t v = R32(slot);
+            if (!v) break;                     // the table ends here
+            uint32_t ord = v & 0x7FFFFFFF;     // high bit flags an import by ordinal
+            uint32_t addr = LibraryExportAddress(lib.name.c_str(), ord);
+            if (addr) {
+                W32(slot, addr);
+            } else {
+                LOGW("boot: %s import %u has no implementation", lib.name.c_str(), ord);
+                missing_lib++;
+            }
+        }
+        LOGI("boot: %s imports resolved, %u missing", lib.name.c_str(), missing_lib);
+    }
+
     MountDefaults(game_dir, data_dir);
 
     // a quick reboot into this title left its launch data page behind

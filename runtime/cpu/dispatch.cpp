@@ -76,6 +76,8 @@ Export g_exports[400];
 
 // synthetic guest addresses for kernel functions reached through a pointer
 constexpr uint32_t kKernelThunkBase = 0xFE000000;
+// and for the exports of the libraries an image imports from, like xbdm.dll
+constexpr uint32_t kLibraryThunkBase = 0xFC000000;
 
 namespace dispatch {
 
@@ -135,6 +137,19 @@ uint32_t HostThunk(X86Func* fn) {
 
 uint32_t KernelThunkAddress(uint32_t ordinal) { return kKernelThunkBase + ordinal * 4; }
 
+// the host's versions of the exports a library gives an image: each gets a
+// guest address, which goes into the image's import table
+static std::vector<kernel::KernelFn> g_library_thunks;
+static std::mutex g_library_lock;
+
+uint32_t LibraryThunkAddress(kernel::KernelFn fn) {
+    std::lock_guard<std::mutex> lock(g_library_lock);
+    for (size_t i = 0; i < g_library_thunks.size(); i++)
+        if (g_library_thunks[i] == fn) return kLibraryThunkBase + uint32_t(i) * 4;
+    g_library_thunks.push_back(fn);
+    return kLibraryThunkBase + uint32_t(g_library_thunks.size() - 1) * 4;
+}
+
 }  // namespace dispatch
 
 void x86_icall(X86Context& ctx, uint8_t* base, uint32_t target) {
@@ -147,6 +162,18 @@ void x86_icall(X86Context& ctx, uint8_t* base, uint32_t target) {
     if (target >= kKernelThunkBase && target < kKernelThunkBase + 400 * 4) {
         x86_kernel(ctx, base, (target - kKernelThunkBase) / 4);
         return;
+    }
+    if (target >= kLibraryThunkBase && target < kLibraryThunkBase + 0x1000) {
+        kernel::KernelFn fn = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(dispatch::g_library_lock);
+            size_t i = (target - kLibraryThunkBase) / 4;
+            if (i < dispatch::g_library_thunks.size()) fn = dispatch::g_library_thunks[i];
+        }
+        if (fn) {
+            fn(ctx, base);
+            return;
+        }
     }
     if (target >= dispatch::kHostThunkBase) {
         size_t i = (target - dispatch::kHostThunkBase) / 4;
@@ -204,6 +231,33 @@ uint32_t RegisterData(uint32_t ordinal, const char* name, uint32_t size) {
 uint32_t DataAddress(uint32_t ordinal) { return ordinal < 400 ? g_exports[ordinal].data : 0; }
 const char* ExportName(uint32_t ordinal) { return ordinal < 400 && g_exports[ordinal].name ? g_exports[ordinal].name : OrdinalName(ordinal); }
 bool HasExport(uint32_t ordinal) { return ordinal < 400 && (g_exports[ordinal].fn || g_exports[ordinal].data); }
+
+namespace {
+// an export of a library the image imports from, like xbdm.dll's
+struct LibraryExport {
+    std::string library;
+    uint32_t ordinal = 0;
+    const char* name = nullptr;
+    kernel::KernelFn fn = nullptr;
+};
+std::vector<LibraryExport> g_library_exports;
+}  // namespace
+
+void RegisterLibraryExport(const char* library, uint32_t ordinal, const char* name, KernelFn fn) {
+    for (auto& e : g_library_exports)
+        if (e.ordinal == ordinal && e.library == library) {
+            e.name = name;
+            e.fn = fn;
+            return;
+        }
+    g_library_exports.push_back({library, ordinal, name, fn});
+}
+
+uint32_t LibraryExportAddress(const char* library, uint32_t ordinal) {
+    for (auto& e : g_library_exports)
+        if (e.ordinal == ordinal && e.library == library) return dispatch::LibraryThunkAddress(e.fn);
+    return 0;
+}
 
 uint32_t CallGuest(X86Context& ctx, uint32_t fn, const uint32_t* args, size_t count) {
     // the D3D and DirectSound hooks call this several times a draw: no heap, only the registers put back are kept

@@ -31,6 +31,12 @@ struct Library {
     uint16_t major = 0, minor = 0, build = 0, flags = 0;
 };
 
+// a library the image imports from, with the addresses its import table holds
+struct Import {
+    std::string name;        // the library, as its name in the image
+    uint32_t first_thunk = 0;  // where its import table sits in the image
+};
+
 struct Tls {
     uint32_t data_start = 0, data_end = 0, index_addr = 0, callbacks = 0, zero_fill = 0, characteristics = 0;
 };
@@ -44,6 +50,7 @@ struct Image {
     bool debug = false;
     std::vector<Section> sections;
     std::vector<Library> libraries;
+    std::vector<Import> imports;
     Tls tls;
 
     uint32_t U32(uint32_t off) const {
@@ -78,6 +85,20 @@ struct Image {
         if (o < 0) return {};
         std::string s;
         while (size_t(o) < file.size() && file[size_t(o)]) s += char(file[size_t(o++)]);
+        return s;
+    }
+
+    // a UTF-16 string, as the import directory names the libraries it lists
+    std::string WStr(uint32_t va) const {
+        int64_t o = Offset(va);
+        if (o < 0) return {};
+        std::string s;
+        while (size_t(o) + 1 < file.size()) {
+            uint16_t c = uint16_t(file[size_t(o)]) | (uint16_t(file[size_t(o) + 1]) << 8);
+            o += 2;
+            if (!c) break;
+            s += char(c < 128 ? c : '?');
+        }
         return s;
     }
 
@@ -132,6 +153,14 @@ struct Image {
             l.name = n;
             std::memcpy(&l.major, file.data() + o + 8, 8);  // major, minor, build and flags, four uint16 in order
             libraries.push_back(l);
+        }
+        // the import directory: the libraries the image links against, each with
+        // the address of its import table (the header field is an image address)
+        uint32_t imp_dir = U32(0x15C);
+        for (int64_t o = imp_dir ? Offset(imp_dir) : -1; o >= 0; o += 8) {
+            uint32_t thunk = U32(uint32_t(o)), name = U32(uint32_t(o) + 4);
+            if (!thunk || !name) break;
+            imports.push_back({WStr(name), thunk});
         }
         if (cert - base + 12 <= file.size()) title_id = U32(cert - base + 8);  // certificate +8 is the title id
         if (tls_addr) {
