@@ -517,20 +517,30 @@ void Analysis::Run() {
     };
     drain();
     std::fprintf(stderr, "direct: %zu functions, %zu instructions\n", functions.size(), insns_.size());
+    // the pointer seeds and the gap fill decode the rest of the image. They
+    // run first, because the immediates below have to see the whole image:
+    // the guest installs a callback from wherever the compiler put that
+    // code, which is usually deep inside a function the direct walk never
+    // reaches.
+    if (cfg.pointer_seeds) SeedPointers();
+    if (cfg.gap_fill) GapFill();
     // immediates that point at code are callbacks: make sure they are entries.
     //
-    // This runs BEFORE the pointer seeds and the gap fill, and the order
-    // matters. An address that a MOV or a PUSH names is a callback the guest
-    // calls through a pointer -- strong evidence. A gap fill is a guess that
-    // the bytes there are a function. When the gap fill got there first, the
-    // callback was in `functions` already, so this phase skipped it
-    // (`!functions.count(v)`), and the gap fill's decode of it could be a
-    // different function entirely -- or none, leaving an entry with no body,
-    // which traps at run time as "indirect call to X has no recompiled
-    // function". Halo 2's 0x310389 was exactly that: the guest installs it
-    // with `mov dword ptr [0xC60590], 0x310389` and calls it virtually.
+    // An address that a MOV stores into memory is the guest installing a
+    // pointer to code: `mov dword ptr [0xC60590], 0x310389` is the guest
+    // installing a callback it later calls through that pointer. The guest's
+    // own code is the evidence, so such an address is an entry even where it
+    // does not look like one.
+    //
+    // PlausibleEntry filters the rest: a value in a code section is often
+    // data, and only an address after a jump, a return or padding is a
+    // plausible entry. Halo 2's 0x310389 sits in the middle of a function's
+    // body, so PlausibleEntry refused it and the guest's indirect call to
+    // it trapped at run time as "indirect call to 00310389 has no
+    // recompiled function".
     size_t imm = 0;
     std::vector<uint32_t> extra;
+    std::set<uint32_t> installed;  // the guest stores these into memory
     for (auto& [va, insn] : insns_) {
         if (insn.flow != Flow::Normal) continue;
         ZydisDecodedInstruction in;
@@ -540,19 +550,15 @@ void Analysis::Run() {
         for (int i = 0; i < in.operand_count_visible; i++)
             if (ops[i].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                 uint32_t v = uint32_t(ops[i].imm.value.u);
-                // PlausibleEntry is the filter for a POINTER SEED: a value
-                // in the image that looks like code may well be data. An
-                // immediate operand is the guest's own statement that the
-                // address is code -- `mov dword ptr [0xC60590], 0x310389`
-                // is the guest installing a callback. So the address is
-                // taken on the strength of being in a code section, and the
-                // walk below decides whether it is really a function.
-                //
-                // Without this, Halo 2's callback at 0x310389 was refused:
-                // it sits inside a function's body rather than after a jump
-                // or a return, so PlausibleEntry said no, and the guest's
-                // indirect call to it trapped at run time.
-                if (IsCode(v) && !functions.count(v)) extra.push_back(v);
+                if (!IsCode(v) || functions.count(v)) continue;
+                // the guest stores the address into memory: it is a pointer
+                // to code, and the guest calls through it
+                bool stores = in.mnemonic == ZYDIS_MNEMONIC_MOV && i == 1 && ops[0].type == ZYDIS_OPERAND_TYPE_MEMORY;
+                if (stores)
+                    installed.insert(v);
+                else if (!PlausibleEntry(v))
+                    continue;
+                extra.push_back(v);
             }
     }
     std::sort(extra.begin(), extra.end());
@@ -562,6 +568,9 @@ void Analysis::Run() {
         if (functions.count(v)) continue;
         uint8_t cov = cover_[v - lo_];
         if (cov == 1) {
+            // the address is an instruction inside another function's body:
+            // it becomes an entry and the code generator splits the other
+            // function there (the fallthrough becomes a tail call)
             functions.insert(v);
             imm++;
         } else if (cov == 0) {
@@ -577,11 +586,11 @@ void Analysis::Run() {
             refused.push_back(v);
         }
     }
-    // the pointer seeds and the gap fill run last: they are guesses, and a
-    // guess that lands on a callback the guest calls virtually would leave
-    // that callback with no body of its own
-    if (cfg.pointer_seeds) SeedPointers();
-    if (cfg.gap_fill) GapFill();
+    if (!installed.empty()) {
+        std::fprintf(stderr, "installed callbacks: %zu", installed.size());
+        for (uint32_t v : installed) std::fprintf(stderr, " %X", v);
+        std::fprintf(stderr, "\n");
+    }
     // a callback whose code a guess (gap fill, pointer seeds) decoded differently stays out: an indirect call to it traps
     // at run time. Listed so a game's config can name the real ones in [functions].
     if (!refused.empty()) {
