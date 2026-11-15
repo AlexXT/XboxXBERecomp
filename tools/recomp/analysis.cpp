@@ -540,7 +540,19 @@ void Analysis::Run() {
         for (int i = 0; i < in.operand_count_visible; i++)
             if (ops[i].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                 uint32_t v = uint32_t(ops[i].imm.value.u);
-                if (IsCode(v) && !functions.count(v) && PlausibleEntry(v)) extra.push_back(v);
+                // PlausibleEntry is the filter for a POINTER SEED: a value
+                // in the image that looks like code may well be data. An
+                // immediate operand is the guest's own statement that the
+                // address is code -- `mov dword ptr [0xC60590], 0x310389`
+                // is the guest installing a callback. So the address is
+                // taken on the strength of being in a code section, and the
+                // walk below decides whether it is really a function.
+                //
+                // Without this, Halo 2's callback at 0x310389 was refused:
+                // it sits inside a function's body rather than after a jump
+                // or a return, so PlausibleEntry said no, and the guest's
+                // indirect call to it trapped at run time.
+                if (IsCode(v) && !functions.count(v)) extra.push_back(v);
             }
     }
     std::sort(extra.begin(), extra.end());
