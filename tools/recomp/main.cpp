@@ -52,7 +52,24 @@ static bool ParseExit(const toml::node* n, Hook::Exit& e) {
 //     function and a continuation (as a C++ catch block's), and the function holding the call catches the resume
 //   [abi] name = ["esi", "stack", ...]  where a [symbols] function takes each API argument when the image does not
 //     use the convention the host declares: a register, or "stack" for the next stack slot, which the callee pops
-static bool LoadConfig(const fs::path& path, Config& cfg, const fs::path& xdk_dir) {
+static bool LoadConfig(const fs::path& path, Config& cfg, const fs::path& xdk_dir, std::set<std::string>* chain = nullptr) {
+    // the configs include each other: the hand kept file includes the one the
+    // scan wrote, and a file that includes itself would read forever
+    std::set<std::string> own;
+    if (!chain) chain = &own;
+    std::error_code ec;
+    std::string key = fs::canonical(path, ec).string();
+    if (ec) key = path.string();
+    if (!chain->insert(key).second) {
+        std::fprintf(stderr, "%s: the config includes itself\n", path.string().c_str());
+        return false;
+    }
+    struct Unlink {
+        std::set<std::string>* chain;
+        std::string key;
+        ~Unlink() { chain->erase(key); }
+    } unlink{chain, key};
+
     toml::table t;
     try {
         t = toml::parse_file(path.string());
@@ -72,13 +89,22 @@ static bool LoadConfig(const fs::path& path, Config& cfg, const fs::path& xdk_di
                          layout.string().c_str());
             return false;
         }
-        if (!LoadConfig(layout, cfg, xdk_dir)) return false;
+        if (!LoadConfig(layout, cfg, xdk_dir, chain)) return false;
     }
     auto includes = t["includes"].as_array();
     if (includes)
         for (auto& i : *includes)
-            if (auto s = i.value<std::string>())
-                if (!LoadConfig(dir / *s, cfg, xdk_dir)) return false;
+            if (auto s = i.value<std::string>()) {
+                // an include that is not there is a warning, not an error: the
+                // hand kept entries may not exist yet for this image
+                fs::path p = dir / *s;
+                if (!fs::exists(p)) {
+                    std::fprintf(stderr, "%s: the included config %s does not exist\n", path.string().c_str(),
+                                 p.string().c_str());
+                    continue;
+                }
+                if (!LoadConfig(p, cfg, xdk_dir, chain)) return false;
+            }
     if (auto v = t["xbe"]["path"].value<std::string>()) cfg.xbe_path = *v;
     if (auto v = t["xbe"]["title"].value<int64_t>()) cfg.title = uint32_t(*v);
     if (auto v = t["xbe"]["entry"].value<int64_t>()) cfg.entry = uint32_t(*v);
@@ -108,6 +134,13 @@ static bool LoadConfig(const fs::path& path, Config& cfg, const fs::path& xdk_di
     for (auto [key, out] : {std::pair{"symbols", &cfg.symbols}, std::pair{"data", &cfg.data}})
         if (auto f = t[key].as_table())
             for (auto& [k, v] : *f) (*out)[std::string(k.str())] = uint32_t(v.value<int64_t>().value_or(0));
+    // [names] name = address: the game's own functions, so the generated code
+    // calls them by name. The address is the XBE's virtual address.
+    if (auto f = t["names"].as_table())
+        for (auto& [k, v] : *f) {
+            uint32_t a = uint32_t(v.value<int64_t>().value_or(0));
+            if (a) cfg.named_functions[a] = std::string(k.str());
+        }
     if (auto f = t["layout"].as_table())
         for (auto& [k, v] : *f)
             if (auto i = v.value<int64_t>()) cfg.layout[std::string(k.str())] = uint32_t(*i);
