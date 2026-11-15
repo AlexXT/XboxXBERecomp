@@ -1,6 +1,18 @@
 # Original Xbox static recompilation: xbe_recomp, the host runtime and add_xbe_image()
 include_guard(GLOBAL)
 
+# The caches hold what the last build made: the shaders it compiled and the pipelines it built from them. They
+# belong to one build. A change in the renderer, in the recompiled code or in the driver makes them stale, and a
+# stale pipeline is worse than none: it draws the wrong thing or crashes. So every build starts without them.
+function(xbe_clear_caches target)
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -f
+                "$<TARGET_FILE_DIR:${target}>/shadercache.bin"
+                "$<TARGET_FILE_DIR:${target}>/pipelinecache.bin"
+        COMMENT "clearing the shader and pipeline caches: they belong to the build that made them"
+        VERBATIM)
+endfunction()
+
 get_filename_component(XBE_SDK_DIR ${CMAKE_CURRENT_LIST_DIR}/.. ABSOLUTE)
 # build scripts find the SDK's xdk folder and THIRD_PARTY.txt through this
 file(TO_NATIVE_PATH "${XBE_SDK_DIR}" XBE_SDK_DIR_NATIVE)
@@ -148,6 +160,7 @@ function(add_xbe_image_dll target xbe config partitions game_dir)
     # a stamp from an earlier build on the executable's first start would outrank this DLL
     add_custom_command(TARGET ${target}_code POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E rm -f ${XBE_COMPILER_DIR}/work/${target}/built.txt)
+    xbe_clear_caches(${target})
 endfunction()
 
 # Expects assets/<xbe> and the config's out = "generated/<game_dir>". At run time the game may be a disc image instead.
@@ -191,4 +204,5 @@ function(add_xbe_image target xbe config partitions game_dir)
     target_link_libraries(${target} PRIVATE tomlplusplus::tomlplusplus $<LINK_ONLY:SDL3::SDL3-static> d3d12 d3d11 dinput8 dxgi dxguid d3dcompiler xaudio2 ole32 windowscodecs dbghelp winmm dwmapi ws2_32)
     # lld keeps the recompiled weak functions overridable by the host ones
     target_link_options(${target} PRIVATE -fuse-ld=lld -g)
+    xbe_clear_caches(${target})
 endfunction()
