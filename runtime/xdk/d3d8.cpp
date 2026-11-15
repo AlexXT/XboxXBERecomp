@@ -198,6 +198,13 @@ bool g_report_asked = false;  // a visibility report asked for since the last fl
 uint32_t Dev(uint32_t off) { return R32(kDevice + off); }
 void SetDev(uint32_t off, uint32_t v) { W32(kDevice + off, v); }
 
+// the device's render target, and the one the library's own code reads: 5455 keeps them apart (D3D::GetRenderTargetFactors
+// takes the surface at the second), and the library's code follows that one
+void SetRenderTarget(uint32_t s) {
+    SetDev(kDevRenderTarget, s);
+    if (XDK_CDevice_CurrentRenderTarget != xdk::kUnknown) SetDev(XDK_CDevice_CurrentRenderTarget, s);
+}
+
 // The device's own references: a count in bits 19 to 22 of the resource's first dword. A surface's first one
 // also holds its parent. The library's functions do it when the image has them, inlined ones are done here.
 void AddRef(X86Context& ctx, uint32_t res) {
@@ -274,6 +281,14 @@ uint32_t NewSurface(uint32_t w, uint32_t h, uint32_t fmt, uint32_t bpp, uint32_t
         // reached the game's heap when the heap lay right above it
         phys = mem::PhysicalFromVirtual(host ? mem::AllocHostContiguous(pitch * (h + 1), 0x1000)
                                              : mem::AllocContiguous(pitch * (h + 1), 0, 0xFFFFFFFF, 0x1000));
+    // a surface the title made is the title's: the host keeps the memory it draws into, not the object, which the
+    // title may release. The device's back buffer pointer is read by the library's own code (the PixelJar), so a
+    // pointer to a released object faults in the guest, not in the host.
+    if (keep && hdr) {
+        uint32_t own = mem::AllocSystem(24);
+        std::memcpy(HostPtr(own), HostPtr(hdr), 24);
+        hdr = own;
+    }
     if (!hdr) hdr = mem::AllocSystem(24);
     W32(hdr + 0, 0x000D0001);  // surface, one reference, one internal reference held by the device
     W32(hdr + 4, phys);
@@ -496,6 +511,8 @@ bool MakeFrameBuffers(uint32_t pp) {
                                       : XDK_CDevice_FrameSurfaces == xdk::kUnknown ? 0
                                                                                    : kDevice + XDK_CDevice_FrameSurfaces + kSlot[i] * 24,
                                       given[kSlot[i]] != 0);
+        LOGR("d3d: frame buffers %08X %08X %08X, the title's own %08X %08X %08X", g_buffers[0], g_buffers[1],
+             g_buffer_count > 2 ? g_buffers[2] : 0, given[0], given[1], given[2]);
         g_copy_target = NewSurface(w, h, color_fmt, 4, 0, false, true);
         g_depth = 0;
         if (auto_depth || given_depth) {
@@ -508,7 +525,7 @@ bool MakeFrameBuffers(uint32_t pp) {
         }
         std::memcpy(made, want, sizeof made);
     }
-    SetDev(kDevRenderTarget, g_buffers[1]);
+    SetRenderTarget(g_buffers[1]);
     SetDev(kDevDepth, g_depth);
     if (XDK_CDevice_FrameSurfaces == xdk::kUnknown) {
         SetDev(kDevBackBuffer, g_buffers[1]);
@@ -834,10 +851,15 @@ HLE_STDCALL(D3DDevice_EnableOverlay, 1) { return 0; }
 // does not have (Forza: its movies)
 HLE_STDCALL(D3DDevice_UpdateOverlay, 5) {
     static uint32_t calls = 0;
+    // the rects are the title's, and a title that passes one that is not there (a float, say) must not fault the host
+    // over a line of the log
+    auto rect = [](uint32_t at, int i) -> int {
+        return at && mem::IsCommitted(at + uint32_t(i) * 4) ? int32_t(R32(at + i * 4)) : -1;
+    };
     if (calls++ % 600 == 0)
         LOGI("d3d: UpdateOverlay %u: surface %08X (format %08X, size %08X, data %08X) to %d,%d-%d,%d (not shown)", calls,
-             a[0], R32(a[0] + 0xC), R32(a[0] + 0x10), R32(a[0] + 4), a[2] ? int32_t(R32(a[2])) : -1,
-             a[2] ? int32_t(R32(a[2] + 4)) : -1, a[2] ? int32_t(R32(a[2] + 8)) : -1, a[2] ? int32_t(R32(a[2] + 12)) : -1);
+             a[0], R32(a[0] + 0xC), R32(a[0] + 0x10), R32(a[0] + 4), rect(a[2], 0), rect(a[2], 1), rect(a[2], 2),
+             rect(a[2], 3));
     return 0;
 }
 // the front buffer, read back at the guest size, is kept for the next instance after a quick reboot, which may
@@ -869,7 +891,7 @@ HLE_STDCALL(D3DDevice_SetGammaRamp, 2) {
 void SetTargets(X86Context& ctx, uint32_t rt, uint32_t zs) {
     AddRef(ctx, rt);
     uint32_t old_rt = Dev(kDevRenderTarget), old_zs = Dev(kDevDepth);
-    SetDev(kDevRenderTarget, rt);
+    SetRenderTarget(rt);
     SetDev(kDevDepth, zs);
     AddRef(ctx, zs);
     Release(ctx, old_rt);
@@ -978,7 +1000,7 @@ uint32_t SwapFrame(X86Context& ctx, uint32_t swap_flags) {
         Walk(Dev(kDevPush));
         if (!g_copy_open) SetDev(kDevSwapCount, Dev(kDevSwapCount) + 1);
         g_copy_open = true;
-        SetDev(kDevRenderTarget, g_copy_target);
+        SetRenderTarget(g_copy_target);
         SetDev(kDevDepth, 0);
         g_state.rt = SurfaceOf(g_copy_target);
         g_state.zs = SurfaceOf(0);
@@ -1044,7 +1066,7 @@ uint32_t SwapFrame(X86Context& ctx, uint32_t swap_flags) {
         g_copy_open = false;
         for (uint32_t i = 0; i < 4; i++) g_state.textures[i] = Dev(kDevTextures + i * 4);  // what the title bound
         W32(kDirtyFlags, R32(kDirtyFlags) | XDK_DirtyFlags_Texture);
-        SetDev(kDevRenderTarget, g_buffers[1]);
+        SetRenderTarget(g_buffers[1]);
         SetDev(kDevDepth, g_depth);
         g_state.zs = SurfaceOf(g_depth);
         uint32_t w, h;
@@ -1269,6 +1291,7 @@ HLE_STDCALL(D3DDevice_SetTexture, 2) {
     WalkBeforeState();
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     uint32_t stage = a[0] & 3, tex = a[1];
+    LOGR_FIRST(16, "d3d: SetTexture stage %u texture %08X", stage, tex);
     uint32_t old = Dev(kDevTextures + stage * 4);
     AddRef(ctx, tex);
     SetDev(kDevTextures + stage * 4, tex);

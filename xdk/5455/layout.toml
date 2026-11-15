@@ -19,10 +19,12 @@ CDevice_Textures          = 0xB68   # D3DDevice_SetTexture reads and stores [sta
 CDevice_Palettes          = 0xB78   # D3DDevice_SetPalette reads and stores [stage]
 CDevice_AutoDepth         = 0x154C  # the frame buffer init stores the depth buffer
 CDevice_RenderTarget      = 0x15E4  # D3DDevice_GetRenderTarget2 returns it
+CDevice_CurrentRenderTarget = 0x15F4  # D3D::GetRenderTargetFactors takes the surface here and compares it with the one passed
 CDevice_Depth             = 0x15E8  # D3DDevice_GetDepthStencilSurface2 returns it
-CDevice_BackBufferScale   = 0x15F0  # the frame buffer init stores the X scale
-CDevice_BackBuffer        = 0x15F4  # D3DDevice_GetBackBuffer2 returns it for index 0
-CDevice_FrontBuffer       = 0x15F8  # D3DDevice_GetBackBuffer2 returns it for index -1
+# 0x15F0 is not the back buffer's scale in this build: D3D::SwapCopy compares it with 3, and D3D::GetRenderTargetFactors
+# takes the surface at 0x15F4. The scale is not known here, so the host writes none
+CDevice_BackBuffer        = 0x15F8  # D3D::SwapCopy swaps the surfaces at 0x15F8 and 0x15FC: the one drawn into is the back
+CDevice_FrontBuffer       = 0x15FC  # and the one presented is the front
 CDevice_SwapCount         = 0x2058  # D3DDevice_Swap increments it
 # the rest: not read yet, the 4831 values as a first guess
 CDevice_ZScale            = 0x510

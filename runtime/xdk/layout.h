@@ -72,6 +72,11 @@ constexpr bool AllKnown(const LayoutKey (&keys)[N]) {
 #ifndef XDK_CDevice_RenderTarget
 #define XDK_CDevice_RenderTarget 0xFFFFFFFFu
 #endif
+// the render target the device draws into now, which the library's own code reads apart from the one
+// GetRenderTarget2 returns (5455: D3D::GetRenderTargetFactors takes the surface here)
+#ifndef XDK_CDevice_CurrentRenderTarget
+#define XDK_CDevice_CurrentRenderTarget 0xFFFFFFFFu
+#endif
 #ifndef XDK_CDevice_Depth
 #define XDK_CDevice_Depth 0xFFFFFFFFu
 #endif
