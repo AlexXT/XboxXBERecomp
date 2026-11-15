@@ -389,6 +389,7 @@ KERNEL_EXPORT(305, RtlTimeToTimeFields, 2) {
 
 KERNEL_EXPORT(184, NtAllocateVirtualMemory, 5) {
     uint32_t base = R32(a[0]), size = R32(a[2]);
+    LOGR_FIRST(32, "memory: NtAllocateVirtualMemory %08X+%X type %X", base, size, a[3]);
     uint32_t st = mem::AllocateVirtual(base, size, a[3], a[4]);
     if (st == 0) {
         W32(a[0], base);

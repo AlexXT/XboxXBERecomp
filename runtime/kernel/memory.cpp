@@ -340,6 +340,9 @@ uint32_t FreeVirtual(uint32_t& base, uint32_t& size, uint32_t type) {
     }
     uint32_t first = base & ~(kPage - 1);
     uint32_t end = size ? (base + size + kPage - 1) & ~(kPage - 1) : start + r->size;
+    // a title that frees a page and reads it again (the Xbox's memory stays mapped until the pages are used
+    // again) reads what was there; here the pages go away, so what is freed is worth a line
+    if (MemLogLevel()) LOGR("memory: virtual %08X+%X freed", first, end - first);
     Decommit(first, end - first);
     for (uint32_t p = first; p < end; p += kPage) r->commit[(p - start) / kPage] = 0;
     base = first;

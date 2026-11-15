@@ -80,6 +80,19 @@ LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* e) {
             uint64_t va = r->ExceptionInformation[1], g = uint64_t(reinterpret_cast<uintptr_t>(kernel::g_base));
             LOGE("  %s %llX, guest %08llX", r->ExceptionInformation[0] ? "write" : "read", (unsigned long long)va,
                  (unsigned long long)(va - g));
+            // the address the guest wanted, and what the host has there: a fault on a guest address that is
+            // committed says the guest's page is mapped and the fault is elsewhere, and one that is not
+            // committed says the guest asked for memory the host never gave it
+            uint32_t guest = uint32_t(va - g);
+            LOGE("    guest %08X: %s", guest, ::mem::IsCommitted(guest) ? "committed" : "not committed, the title asked for memory the host never gave it");
+            // the guest's and the host's frames share the stack (the guest's stack is the host's), so the raw words
+            // show both: the host's are the ones in the executable
+            uint32_t* sp = reinterpret_cast<uint32_t*>(e->ContextRecord->Rsp);
+            char buf[512];
+            int n = std::snprintf(buf, sizeof buf, "    stack:");
+            for (int i = 0; i < 24 && n < 400; i++) n += std::snprintf(buf + n, sizeof buf - size_t(n), " %08X", sp[i]);
+            LOGE("%s", buf);
+            LOGE("    exe %p, fault %p", GetModuleHandleW(nullptr), r->ExceptionAddress);
         }
         kernel::LogGuestStack(*t->ctx, 256);
     }
