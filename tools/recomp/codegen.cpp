@@ -19,7 +19,13 @@ static std::string Fmt(const char* f, ...) {
 }
 
 std::string CodeGen::Hex(uint32_t v) const { return Fmt("0x%Xu", v); }
-std::string CodeGen::FuncName(uint32_t va) const { return Fmt("sub_%08X", va); }
+std::string CodeGen::FuncName(uint32_t va) const {
+    // a name from the config wins: the address tells you where, the name
+    // tells you what
+    auto it = an_.cfg.named_functions.find(va);
+    if (it != an_.cfg.named_functions.end()) return it->second;
+    return Fmt("sub_%08X", va);
+}
 
 std::string CodeGen::CType(unsigned bits, bool s) const {
     switch (bits) {
