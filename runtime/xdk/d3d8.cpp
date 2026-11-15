@@ -1097,9 +1097,6 @@ HLE_STDCALL(D3DDevice_SetViewport, 1) {
     return 0;
 }
 
-// (min, max, count): the depth clip planes, the viewport's z range already covers them
-HLE_STDCALL(D3DDevice_SetDepthClipPlanes, 3) { return 0; }
-
 HLE_STDCALL(D3DDevice_SetScissors, 3) {
     WalkBeforeState();
     std::lock_guard<std::recursive_mutex> lock(g_lock);
