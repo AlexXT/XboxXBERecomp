@@ -7,14 +7,17 @@ constexpr uint32_t kPage = 0x1000;
 constexpr uint32_t kUserLow = 0x00010000;
 constexpr uint32_t kUserHigh = 0x7FFE0000;
 constexpr uint32_t kContiguousBase = 0x80000000;  // guest VA = kContiguousBase | physical
-constexpr uint32_t kPhysicalSize = 64u << 20;     // the console's memory, all of it the title's
-// physical memory past it, as a development kit has: only the host's own buffers (the renderer's copy target, the
-// DrawVerticesUP ring, the scratch push buffer) are made there, so a title has the console's whole 64 MB
+// The physical memory a development kit had: a debug build takes most of it for one
+// block (Halo 2's takes 54 MB), so the host keeps room for its own buffers.
+constexpr uint32_t kPhysicalSize = 128u << 20;
+// physical memory past it, for the host's own buffers (the renderer's copy target, the DrawVerticesUP ring, the
+// scratch push buffer): only the host makes allocations there, so a title has the development kit's whole 128 MB
 constexpr uint32_t kHostPhysicalSize = 64u << 20;
 constexpr uint32_t kMappedPhysical = kPhysicalSize + kHostPhysicalSize;
 constexpr uint32_t kWriteCombineBase = 0xF0000000;
-constexpr uint32_t kKernelDataBase = 0x80000000;   // first physical megabyte holds kernel variables
-constexpr uint32_t kKernelDataSize = 0x00100000;
+constexpr uint32_t kKernelDataBase = 0x80000000;   // the first pages of physical memory hold kernel variables
+constexpr uint32_t kKernelDataSize = 0x00010000;   // the kernel's variables take a few hundred bytes; the rest is
+                                                    // physical memory a title may ask for as one block
 constexpr uint32_t kSystemBase = 0xB0000000;       // pool, system memory, thread blocks
 constexpr uint32_t kSystemSize = 0x10000000;
 constexpr uint32_t kStackBase = 0xD0000000;
