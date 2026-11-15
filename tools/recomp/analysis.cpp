@@ -517,9 +517,18 @@ void Analysis::Run() {
     };
     drain();
     std::fprintf(stderr, "direct: %zu functions, %zu instructions\n", functions.size(), insns_.size());
-    if (cfg.pointer_seeds) SeedPointers();
-    if (cfg.gap_fill) GapFill();
-    // immediates that point at code are callbacks: make sure they are entries
+    // immediates that point at code are callbacks: make sure they are entries.
+    //
+    // This runs BEFORE the pointer seeds and the gap fill, and the order
+    // matters. An address that a MOV or a PUSH names is a callback the guest
+    // calls through a pointer -- strong evidence. A gap fill is a guess that
+    // the bytes there are a function. When the gap fill got there first, the
+    // callback was in `functions` already, so this phase skipped it
+    // (`!functions.count(v)`), and the gap fill's decode of it could be a
+    // different function entirely -- or none, leaving an entry with no body,
+    // which traps at run time as "indirect call to X has no recompiled
+    // function". Halo 2's 0x310389 was exactly that: the guest installs it
+    // with `mov dword ptr [0xC60590], 0x310389` and calls it virtually.
     size_t imm = 0;
     std::vector<uint32_t> extra;
     for (auto& [va, insn] : insns_) {
@@ -556,6 +565,11 @@ void Analysis::Run() {
             refused.push_back(v);
         }
     }
+    // the pointer seeds and the gap fill run last: they are guesses, and a
+    // guess that lands on a callback the guest calls virtually would leave
+    // that callback with no body of its own
+    if (cfg.pointer_seeds) SeedPointers();
+    if (cfg.gap_fill) GapFill();
     // a callback whose code a guess (gap fill, pointer seeds) decoded differently stays out: an indirect call to it traps
     // at run time. Listed so a game's config can name the real ones in [functions].
     if (!refused.empty()) {
