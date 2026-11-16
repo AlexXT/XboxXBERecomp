@@ -174,6 +174,9 @@ void LeaveDpc();
 void DropDispatch();
 void InitKernelData();
 void LogGuestStack(X86Context& ctx, int words);
+// every thread of the title with the stack it is on, for a title that stopped: the stacks are the guest's, so the
+// addresses are the ones in the executable and a symbolizer names them
+void LogGuestThreads(const char* why);
 X86Context& CurrentContext();
 ThreadRef CreateThread(uint32_t stack_size, uint32_t tls_size, uint32_t system_routine, uint32_t start_routine,
                        uint32_t start_context, bool suspended);

@@ -298,6 +298,18 @@ void LogGuestStack(X86Context& ctx, int words) {
         if (dispatch::InCode(v)) LOGE("  [esp+%03X] %08X", i * 4, v);
     }
 }
+
+// every thread of the title with the stack it is on, for a title that stopped: the addresses are the guest's, so a
+// symbolizer names them
+void LogGuestThreads(const char* why) {
+    LOGE("%s: the title's threads", why);
+    for (auto& t : Threads()) {
+        if (!t || !t->ctx) continue;
+        LOGE("  thread %X, suspended %d, stack %08X", t->id, t->suspend.load(), t->stack_top);
+        LogGuestStack(*t->ctx, 24);
+    }
+    logx::Flush();
+}
 }  // namespace kernel
 
 void x86_trap(X86Context& ctx, uint32_t va, const char* what) {

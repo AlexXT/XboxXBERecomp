@@ -599,7 +599,15 @@ private:
                     SettleBatches();
                     continue;
                 }
-                source_cv.wait(lock, [&] { return (pre_ ? prep_exited_ : stop_) || !source.empty(); });
+                // the title stops drawing: say where its threads are, once per stall. A title that waits for
+                // something that never comes (a fence the host does not signal, a thread that died) shows it here
+                if (!source_cv.wait_for(lock, std::chrono::seconds(5),
+                                       [&] { return (pre_ ? prep_exited_ : stop_) || !source.empty(); })) {
+                    lock.unlock();
+                    kernel::LogGuestThreads("the title stopped drawing");
+                    lock.lock();
+                    continue;
+                }
                 if (source.empty()) break;
                 b = source.front();
                 source.pop_front();
