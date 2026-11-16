@@ -1,5 +1,6 @@
 #include "gpu/shaders.h"
 #include "app/app.h"
+#include "core/log.h"
 #include "gpu/vertex.h"
 
 #include <algorithm>
@@ -616,6 +617,16 @@ uint64_t Hash(const void* p, size_t n, uint64_t h) {
 PixelKey MakePixelKey(const State& s, const TexInfo tex[4]) {
     PixelKey k;
     std::memset(&k, 0, sizeof(k));
+    {
+        // what the fixed function has to work with, the first few draws: the lighting, the ambient and the stages
+        static int logged = 0;
+        if (logged < 3) {
+            logged++;
+            LOGR("d3d: fixed function %d: lighting %u ambient %08X specular %u vertex colour %u, stages %u %u %u %u",
+                 logged, s.rs[kRsLighting], s.rs[kRsAmbient], s.rs[kRsSpecularEnable], s.rs[kRsColorVertex],
+                 s.tss[0][kTssColorOp], s.tss[1][kTssColorOp], s.tss[2][kTssColorOp], s.tss[3][kTssColorOp]);
+        }
+    }
     for (int i = 0; i < 4; i++) {
         k.tex[i] = tex[i];
         if (s.tss[size_t(i)][kTssAlphaKill] == 4) k.alphakill |= 1u << i;  // D3DTALPHAKILL_ENABLE
@@ -658,7 +669,9 @@ PixelKey MakePixelKey(const State& s, const TexInfo tex[4]) {
                          t[kTssAlphaArg1],  t[kTssAlphaArg2], t[kTssAlphaArg0], t[kTssResultArg]};
         std::memcpy(k.ff[i], v, sizeof(v));
         if (program || (t[kTssTextureTransformFlags] & 0x100)) k.proj |= 1u << i;  // D3DTTFF_PROJECTED
-        if (t[kTssColorOp] <= 1) break;
+        // a stage with D3DTOP_DISABLE is off on its own (the Xbox's D3DTOP_DISABLE disables the stage, not the
+        // ones after it: a title that disables the first stage and draws with the last still gets its picture)
+        if (t[kTssColorOp] <= 1) continue;
     }
     return k;
 }
@@ -768,6 +781,16 @@ std::string VertexProgramHlsl(const std::vector<uint32_t>& prog, uint16_t regs, 
 FixedKey MakeFixedKey(const State& s) {
     FixedKey f;
     f.blend = s.rs[kRsVertexBlend];
+    {
+        // what the fixed function has to work with, once per draw: the lighting, the ambient and the stages
+        static int logged = 0;
+        if (logged < 8) {
+            logged++;
+            LOGR("d3d: fixed function %d: lighting %u ambient %08X specular %u vertex colour %u, stages %u %u %u %u",
+                 logged, s.rs[kRsLighting], s.rs[kRsAmbient], s.rs[kRsSpecularEnable], s.rs[kRsColorVertex],
+                 s.tss[0][kTssColorOp], s.tss[1][kTssColorOp], s.tss[2][kTssColorOp], s.tss[3][kTssColorOp]);
+        }
+    }
     if (s.rs[kRsLighting]) {
         f.light = 1 | (s.rs[kRsSpecularEnable] ? 2 : 0) | (s.rs[kRsLocalViewer] ? 4 : 0) | (s.rs[kRsNormalizeNormals] ? 8 : 0);
         if (s.rs[kRsColorVertex])
@@ -1004,7 +1027,7 @@ std::string PixelHlsl(const PixelKey& k) {
         body += "float4 cur = v0, tmp = 0;\n";
         for (int i = 0; i < 4; i++) {
             const uint32_t* f = k.ff[i];
-            if (f[0] <= 1) break;
+            if (f[0] <= 1) continue;  // D3DTOP_DISABLE: the stage is off on its own
             const TexInfo& t = k.tex[i];
             std::string norm = (t.rect ? F(" / texsize[%d].xy", i) : "") + F(" + texsize[%d].zw", i);
             std::string uv = (k.proj >> i) & 1 ? F("(tc%d.xy / tc%d.w)%s", i, i, norm.c_str()) : F("tc%d.xy%s", i, norm.c_str());

@@ -400,7 +400,26 @@ void ApplyDefaultStates(X86Context& ctx) {
     GUEST_CALL(D3D_InitDefaultState, ctx, {});
 #else
     (void)ctx;
-    LOG_FIRST(1, "d3d: the image has no D3D_InitDefaultState, default states were not applied");
+    // the image has no library function to set them, so the host sets the console's defaults: the lighting on and
+    // the ambient white, and each stage taking its texture (D3DTOP_SELECTARG1 with D3DTA_TEXTURE, the default),
+    // the address modes wrapping and the filters linear
+    SetComplex(gpu::kRsLighting, 1);
+    SetComplex(gpu::kRsAmbient, 0xFFFFFFFF);
+    SetComplex(gpu::kRsColorVertex, 1);
+    for (int s = 0; s < 4; s++) {
+        StoreTss(s, gpu::kTssColorOp, 2);
+        StoreTss(s, gpu::kTssColorArg1, 2);
+        StoreTss(s, gpu::kTssAlphaOp, 2);
+        StoreTss(s, gpu::kTssAlphaArg1, 2);
+        StoreTss(s, gpu::kTssResultArg, 0);
+        StoreTss(s, gpu::kTssAddressU, 1);
+        StoreTss(s, gpu::kTssAddressV, 1);
+        StoreTss(s, gpu::kTssAddressW, 1);
+        StoreTss(s, gpu::kTssMagFilter, 2);
+        StoreTss(s, gpu::kTssMinFilter, 2);
+        StoreTss(s, gpu::kTssMipFilter, 2);
+    }
+    LOG_FIRST(1, "d3d: the image has no D3D_InitDefaultState, the host set the default states");
 #endif
 }
 

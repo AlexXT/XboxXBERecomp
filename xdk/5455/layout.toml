@@ -57,3 +57,4 @@ TextureState_Stage        = 4
 Stream_Size               = 12
 Stream_Stride             = 0x0
 Stream_Buffer             = 0x8
+StateNumbering = 5455

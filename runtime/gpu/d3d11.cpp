@@ -446,6 +446,9 @@ bool D3D11Backend::Init(uint32_t width, uint32_t height) {
     guest_w_ = width;
     guest_h_ = height;
     aspect_ = app::FrameAspect();
+    // the console's default ramp is the identity: a title that sets none still gets its picture
+    for (int i = 0; i < 256; i++) ramp_[i] = ramp_[i + 256] = ramp_[i + 512] = uint8_t(i);
+    ramp_dirty_ = true;
     scale_ = app::RenderScale(guest_h_);
     HWND hwnd = static_cast<HWND>(app::Window());
     if (!CreateDevice() || !CreateSwapChain(hwnd) || !CreateFixed()) return false;
