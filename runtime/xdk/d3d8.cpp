@@ -394,6 +394,33 @@ void StoreTss(uint32_t stage, uint32_t tss, uint32_t v) {
     W32(kTextureState + (stage * kStageStates + xdk::states::kNumbering.tss[tss]) * 4, v);
 }
 
+// The console's default simple render states, as the library's own InitializeD3dState sets them
+// (g_InitialRenderStates in the XDK's d3d8: color write all, depth write on, LESSEQUAL, no blending or alpha test).
+// A title whose statically linked initialization never reaches the host would otherwise draw with every state zero,
+// and a zero COLORWRITEENABLE discards every colour write.
+void SeedSimpleDefaults() {
+    static const bool once = [] {
+        auto put = [](uint32_t method, uint32_t v) { g_state.simple[method >> 2] = v; };
+        put(gpu::kMColorWriteEnable, 0x01010101);  // D3DCOLORWRITEENABLE_ALL (alpha, red, green, blue bytes)
+        put(gpu::kMZWriteEnable, 1);
+        put(gpu::kMZFunc, 0x203);       // D3DCMP_LESSEQUAL
+        put(gpu::kMAlphaFunc, 0x207);   // D3DCMP_ALWAYS
+        put(gpu::kMAlphaTestEnable, 0);
+        put(gpu::kMBlendEnable, 0);
+        put(gpu::kMSrcBlend, 1);        // D3DBLEND_ONE
+        put(gpu::kMDestBlend, 0);       // D3DBLEND_ZERO
+        put(gpu::kMBlendOp, 0x8006);    // D3DBLENDOP_ADD
+        put(gpu::kMShadeMode, 0x1d01);  // D3DSHADE_GOURAUD
+        put(gpu::kMStencilFunc, 0x207);    // D3DCMP_ALWAYS
+        put(gpu::kMStencilZFail, 0x1e00);  // D3DSTENCILOP_KEEP
+        put(gpu::kMStencilPass, 0x1e00);
+        put(gpu::kMStencilMask, 0xFFFFFFFF);
+        put(gpu::kMStencilWriteMask, 0xFFFFFFFF);
+        return true;
+    }();
+    (void)once;
+}
+
 // The library's default render and texture stage states; its pushes land in the scratch buffer
 void ApplyDefaultStates(X86Context& ctx) {
 #if HAS_D3D_InitDefaultState
@@ -1557,6 +1584,13 @@ void WalkPending() {
 }
 // the same for the other setters; XBE_STATE_WALK=0 turns it off to compare
 void WalkBeforeState() {
+    // the console's defaults once, before the title's own first pushed state: the library's initialization writes
+    // them into the push buffer, and this image's own D3D does it before the host reads anything
+    static const bool seeded = [] {
+        SeedSimpleDefaults();
+        return true;
+    }();
+    (void)seeded;
     static const bool on = [] {
         const char* e = std::getenv("XBE_STATE_WALK");
         bool v = !(e && *e == '0');
@@ -2186,6 +2220,7 @@ void EndPrimitive() {
 // reads the commands pushed since the last call: vertex data between a begin and an end is drawn, visibility tests
 // are run, vertex shader constants are loaded, the rest is skipped
 void Walk(uint32_t end) {
+    SeedSimpleDefaults();
     if (!g_walk || end < g_walk || end > g_walk_limit) return;
     for (uint32_t p = g_walk; p + 4 <= end;) {
         // count in bits 18 to 28, bit 30 keeps the method for every value
@@ -2288,6 +2323,9 @@ void Walk(uint32_t end) {
                 last = m == 0x1524;
                 a[(m - 0x1518) / 4] = f;
             } else {
+                // not a vertex attribute: a simple render state, as EndPush reads them (the library's own
+                // D3D_InitDefaultState pushes every default through here)
+                if (m != 0x1818 && m >> 2 < g_state.simple.size()) g_state.simple[m >> 2] = v;
                 continue;
             }
             if (size_t r = (a - g_im_attr) / 4; r < g_state.vattr.size()) std::memcpy(g_state.vattr[r].data(), a, 16);
