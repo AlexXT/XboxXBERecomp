@@ -7,6 +7,26 @@ This tool was originally created for porting [Tom Clancy's Splinter Cell: Double
 > [!NOTE]
 > This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build.
 
+## About this fork
+
+This is a fork of [hk21x/XboxXBERecomp](https://github.com/hk21x/XboxXBERecomp),
+itself a fork of [TGP482/XboxXBERecomp](https://github.com/TGP482/XboxXBERecomp).
+Most of the changes here were made while bringing up the **Halo 2 May 2003
+beta**, specifically its `halo2debug.xbe`: its linker map, its still-present
+pstencil renderer and its debug-build quirks made it a useful stress test for
+the XDK 5455 path. The game project is
+[AlexXT/halo2xbe](https://github.com/AlexXT/halo2xbe); see
+[FORK_NOTES.md](FORK_NOTES.md) for each change and why it was needed.
+
+In short, the fork adds XDK **5455** signatures and an `xbdm.dll` host, D3D8
+fixes for titles that initialise their own D3D through the push buffer
+(texture-stage stride, device-held pixel shader, render states and buffer
+layout), the debug kit's 128 MB of physical memory, `[names]` config support,
+callback and function-entry discovery fixes, better fault and thread
+diagnostics, SDL XInput pad detection with stick deadzone/sensitivity tuning,
+and per-build shader/pipeline cache clearing. None of it is game data — the
+toolkit still ships no game assets.
+
 ## Installation
 
 - Put this repository in your game repository as `sdk/`. This can be a copy or a submodule.
