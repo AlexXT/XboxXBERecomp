@@ -1813,6 +1813,8 @@ HLE_STDCALL(D3DDevice_SetPixelShader, 1) {
 
 // (pPSDef): the library makes a PixelShader around the definition, points the device at it and calls SetPixelShader.
 // A title that inlines the library still ends up here: the host only needs the definition.
+// Titles without this symbol in their image have no such function to wrap.
+#if HAS_D3DDevice_SetPixelShaderProgram
 HLE_WRAP(D3DDevice_SetPixelShaderProgram, 1) {
     std::lock_guard<std::recursive_mutex> lock(g_lock);
     g_state.ps = nullptr;
@@ -1822,6 +1824,7 @@ HLE_WRAP(D3DDevice_SetPixelShaderProgram, 1) {
         g_state.ps = ps;
     }
 }
+#endif  // HAS_D3DDevice_SetPixelShaderProgram
 
 HLE_STDCALL(D3DDevice_SetPixelShaderConstant, 3) {
     WalkBeforeState();

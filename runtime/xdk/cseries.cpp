@@ -61,6 +61,7 @@ bool LogAssertion(const std::string& key, unsigned long long& count) {
 }  // namespace
 
 // (const char* text, const char* file, long line, bool fatal)
+#if HAS_display_assert
 X86_EXTERN_FUNC(GUEST_ORIG(display_assert));
 X86_FUNC(GUEST(display_assert)) {
     if (SkipAsserts()) {
@@ -74,8 +75,10 @@ X86_FUNC(GUEST(display_assert)) {
     }
     GUEST_ORIG(display_assert)(ctx, base);
 }
+#endif  // HAS_display_assert
 
 // (int code): the assertion macro calls system_exit(-1) when no debugger is attached
+#if HAS_system_exit
 X86_EXTERN_FUNC(GUEST_ORIG(system_exit));
 X86_FUNC(GUEST(system_exit)) {
     if (SkipAsserts() && int32_t(R32(ctx.esp + 4)) == -1) {
@@ -87,3 +90,4 @@ X86_FUNC(GUEST(system_exit)) {
     }
     GUEST_ORIG(system_exit)(ctx, base);
 }
+#endif  // HAS_system_exit

@@ -29,7 +29,9 @@ constexpr uint32_t kGamepadType = SYM(XPP_GamepadType);
 constexpr uint32_t kMemoryUnitType = SYM(XPP_MemoryUnitType);
 
 // Developer console bridge: commands typed in the F1 overlay are run here, on
-// the guest thread, through the game's own console processor.
+// the guest thread, through the game's own console processor. Only titles whose
+// config names these guest functions can link it (the Halo 2 beta debug build).
+#if HAS_console_update_hook && HAS_console_process_command && HAS_console_open
 X86_EXTERN_FUNC(GUEST_ORIG(console_update_hook));
 X86_EXTERN_FUNC(GUEST_ORIG(console_process_command));
 X86_EXTERN_FUNC(GUEST_ORIG(console_open));
@@ -64,6 +66,7 @@ X86_FUNC(GUEST(console_update_hook)) {
     }
     GUEST_ORIG(console_update_hook)(ctx, base);
 }
+#endif  // HAS_console_*
 
 std::mutex g_ports_lock;
 bool g_poller = false;
