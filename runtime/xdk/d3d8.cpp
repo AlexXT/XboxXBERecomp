@@ -602,6 +602,14 @@ bool MakeFrameBuffers(uint32_t pp) {
     }
     SetRenderTarget(g_buffers[1]);
     SetDev(kDevDepth, g_depth);
+    // The XDK's own CreateDevice installs a miniport object under the device and
+    // the library's inline code indexes through it (vblank, field, gamma, mode).
+    // HLE replaces that init, so mirror the pointer with a zeroed block.
+    if (XDK_CDevice_Miniport != xdk::kUnknown && !R32(kDevice + XDK_CDevice_Miniport)) {
+        uint32_t mp = mem::AllocSystem(0x800);
+        std::memset(HostPtr(mp), 0, 0x800);
+        W32(kDevice + XDK_CDevice_Miniport, mp);
+    }
     if (XDK_CDevice_FrameSurfaces == xdk::kUnknown) {
         SetDev(kDevBackBuffer, g_buffers[1]);
         SetDev(kDevFrontBuffer, g_buffers[1]);
