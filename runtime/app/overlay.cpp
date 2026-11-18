@@ -39,6 +39,11 @@ std::atomic<bool> g_open{false};
 std::mutex g_console_lock;
 std::deque<std::string> g_console_commands;
 bool g_console_open = false;
+// Halo 2's defaults; a game's init hook replaces these with its own commands
+std::vector<std::pair<const char*, const char*>> g_quick_commands = {
+    {"main_menu", "main_menu"}, {"map_reset", "map_reset"}, {"version", "version"},
+    {"jetpack", "cheat_jetpack 1"}, {"all weapons", "cheat_all_weapons"},
+};
 // a key binding waiting for its key: the input and the slot, -1 none
 std::atomic<int> g_bind_control{-1}, g_bind_slot{0};
 
@@ -812,6 +817,10 @@ bool TakeConsoleOpen() {
     return v;
 }
 
+void SetConsoleQuickCommands(std::vector<std::pair<const char*, const char*>> cmds) {
+    g_quick_commands = std::move(cmds);
+}
+
 void Console(Settings&) {
     Section("Developer console");
     Note("Runs commands through the game's own console. Output is printed to assets\\debug.txt.");
@@ -823,14 +832,11 @@ void Console(Settings&) {
     ImGui::SameLine();
     if (ImGui::Button("Open display")) QueueConsoleOpen();
     Note("Quick commands:");
-    if (ImGui::Button("main_menu")) QueueConsoleCommand("main_menu");
-    ImGui::SameLine();
-    if (ImGui::Button("map_reset")) QueueConsoleCommand("map_reset");
-    ImGui::SameLine();
-    if (ImGui::Button("version")) QueueConsoleCommand("version");
-    if (ImGui::Button("jetpack")) QueueConsoleCommand("cheat_jetpack 1");
-    ImGui::SameLine();
-    if (ImGui::Button("all weapons")) QueueConsoleCommand("cheat_all_weapons");
+    int column = 0;
+    for (auto& [label, command] : g_quick_commands) {
+        if (column++ % 3) ImGui::SameLine();
+        if (ImGui::Button(label)) QueueConsoleCommand(command);
+    }
 }
 
 bool OverlayOpen() { return g_open; }

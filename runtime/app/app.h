@@ -103,6 +103,8 @@ void QueueConsoleCommand(const std::string& command);
 bool TakeConsoleCommand(std::string& command);
 void QueueConsoleOpen();
 bool TakeConsoleOpen();
+// F1 Console page quick-command buttons, label -> command; replaces the defaults
+void SetConsoleQuickCommands(std::vector<std::pair<const char*, const char*>> cmds);
 
 Settings& Get();
 void Load();
