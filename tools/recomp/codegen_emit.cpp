@@ -111,7 +111,10 @@ std::string CodeGen::EmitFunction(uint32_t entry) {
     if (seh) out += "\tconst uint32_t x86_frame = ctx.esp;\n\ttry {\n";
     out += "\tX86_LOAD_FLAGS();\n\tuint32_t ca = 0, cb = 0;\n\t(void)ca; (void)cb;\n";
     // code below the entry (a shared tail reached by a jump) is emitted first, so enter by label
-    bool entry_first = !body.empty() && body.front() == entry;
+    // An undecoded seed has no body at all: its trap is the whole function, so
+    // there is no entry label to jump to. Entering by label is only needed when
+    // there is a body and it starts elsewhere.
+    bool entry_first = body.empty() || body.front() == entry;
     if (!entry_first) out += F("\tgoto loc_%08X;\n", entry);
     if (labels_.count(entry) && entry_first) out += F("loc_%08X:;\n", entry);
     out += body_;
