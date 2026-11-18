@@ -167,6 +167,7 @@ constexpr uint32_t kStageStates = XDK_TextureState_Stage, kStreamSize = XDK_Stre
 
 gpu::State g_state;
 std::unique_ptr<gpu::Backend> g_backend;
+static uint32_t g_miniport = 0;  // mirrored XDK miniport object, status words below
 std::recursive_mutex g_lock;
 
 std::unordered_map<uint32_t, std::shared_ptr<gpu::VertexShader>> g_vs;
@@ -621,6 +622,7 @@ bool MakeFrameBuffers(uint32_t pp) {
         W32(mp + 0x3800, 0u);      // +0x2500: clear
         W32(mp + 0x3400, 1u);      // +0x2100: a nonzero state
         W32(mp + 0x4550, 0u);      // +0x3250: clear
+        g_miniport = mp;
         W32(kDevice + XDK_CDevice_Miniport, mp);
     }
     if (XDK_CDevice_FrameSurfaces == xdk::kUnknown) {
@@ -1141,6 +1143,16 @@ uint32_t SwapFrame(X86Context& ctx, uint32_t swap_flags) {
         }
     }
     Walk(Dev(kDevPush));  // reports asked for at the end of the frame
+    // Advance the guest's shadowed GPU status every frame. Without hardware to
+    // raise these, its shader-setup loops would wait on them forever.
+    if (g_miniport) {
+        W32(g_miniport + 0x1400, 0x01000000u);
+        W32(g_miniport + 0x4514, 0x10u);
+        W32(g_miniport + 0x4520, 0u);
+        W32(g_miniport + 0x3800, 0u);
+        W32(g_miniport + 0x3400, 1u);
+        W32(g_miniport + 0x4550, 0u);
+    }
     if (g_backend) {
         gpu::Surface front = SurfaceOf(g_buffers[1]);
         front.blend = g_frame_blend.exchange(1);
