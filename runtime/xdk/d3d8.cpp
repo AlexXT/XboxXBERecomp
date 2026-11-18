@@ -609,6 +609,9 @@ bool MakeFrameBuffers(uint32_t pp) {
         constexpr uint32_t kMiniportSize = 0x800000;
         uint32_t mp = mem::AllocSystem(kMiniportSize);
         std::memset(HostPtr(mp), 0, kMiniportSize);
+        // sub_006179C7 leaves its loop only when this status bit is set. With no
+        // NV2A to raise it, present it as already done.
+        W32(mp + 0x1400, 0x01000000u);
         W32(kDevice + XDK_CDevice_Miniport, mp);
     }
     if (XDK_CDevice_FrameSurfaces == xdk::kUnknown) {
