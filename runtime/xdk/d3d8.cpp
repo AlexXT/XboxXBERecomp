@@ -613,6 +613,14 @@ bool MakeFrameBuffers(uint32_t pp) {
         // its shader/material setup loop. There is no real NV2A here to clear
         // it, so present it as permanently ready.
         W32(mp + 0x1400, 0x01000000u);
+        // The guest's shader-setup helpers poll status words in the object at
+        // miniport+0x1300. Seed the bits their loops wait on ("work done", no
+        // pending flush) so an absent GPU cannot hold them forever.
+        W32(mp + 0x4514, 0x10u);   // +0x3214: set
+        W32(mp + 0x4520, 0u);      // +0x3220: clear
+        W32(mp + 0x3800, 0u);      // +0x2500: clear
+        W32(mp + 0x3400, 1u);      // +0x2100: a nonzero state
+        W32(mp + 0x4550, 0u);      // +0x3250: clear
         W32(kDevice + XDK_CDevice_Miniport, mp);
     }
     if (XDK_CDevice_FrameSurfaces == xdk::kUnknown) {
