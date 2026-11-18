@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <deque>
+#include <mutex>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -32,6 +34,11 @@ namespace app {
 namespace {
 
 std::atomic<bool> g_open{false};
+
+// Developer console: commands queued here are run by the title's console hook.
+std::mutex g_console_lock;
+std::deque<std::string> g_console_commands;
+bool g_console_open = false;
 // a key binding waiting for its key: the input and the slot, -1 none
 std::atomic<int> g_bind_control{-1}, g_bind_slot{0};
 
@@ -766,6 +773,55 @@ void Controls(Settings& s) {
 
 }  // namespace
 
+// Developer console bridge: the F1 Console page queues commands here and the
+// title's console_update hook runs them through console_process_command.
+void QueueConsoleCommand(const std::string& command) {
+    if (command.empty()) return;
+    std::lock_guard<std::mutex> lock(g_console_lock);
+    g_console_commands.push_back(command);
+}
+
+bool TakeConsoleCommand(std::string& command) {
+    std::lock_guard<std::mutex> lock(g_console_lock);
+    if (g_console_commands.empty()) return false;
+    command = g_console_commands.front();
+    g_console_commands.pop_front();
+    return true;
+}
+
+void QueueConsoleOpen() {
+    std::lock_guard<std::mutex> lock(g_console_lock);
+    g_console_open = true;
+}
+
+bool TakeConsoleOpen() {
+    std::lock_guard<std::mutex> lock(g_console_lock);
+    bool v = g_console_open;
+    g_console_open = false;
+    return v;
+}
+
+void Console(Settings&) {
+    Section("Developer console");
+    Note("Runs commands through the game's own console. Output is printed to assets\\debug.txt.");
+    static char line[256] = {};
+    if (ImGui::InputText("command", line, sizeof(line), ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::Button("Run")) {
+        if (line[0]) QueueConsoleCommand(line);
+        line[0] = 0;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Open display")) QueueConsoleOpen();
+    Note("Quick commands:");
+    if (ImGui::Button("main_menu")) QueueConsoleCommand("main_menu");
+    ImGui::SameLine();
+    if (ImGui::Button("map_reset")) QueueConsoleCommand("map_reset");
+    ImGui::SameLine();
+    if (ImGui::Button("version")) QueueConsoleCommand("version");
+    if (ImGui::Button("jetpack")) QueueConsoleCommand("cheat_jetpack 1");
+    ImGui::SameLine();
+    if (ImGui::Button("all weapons")) QueueConsoleCommand("cheat_all_weapons");
+}
+
 bool OverlayOpen() { return g_open; }
 
 void FeedPad() {
@@ -931,6 +987,7 @@ const std::vector<Page>& Pages() {
         std::vector<Page> p = {{"Display", Display}, {"Graphics", Graphics}, {"Game", [](Settings&) { GameOptions(); }}};
         if (!kGame.achievements.empty()) p.push_back({"Achievements", [](Settings&) { Achievements(); }});
         p.push_back({"General", General});
+        p.push_back({"Console", Console});
         p.push_back({"Wheel", Wheel});
         p.push_back({"Controls", Controls});
         p.push_back({"Quit", [](Settings&) { QuitPage(); }});

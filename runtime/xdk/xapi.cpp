@@ -1,6 +1,11 @@
 // XAPI functions that talk to hardware: controller ports and the hard disk cache partition
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <string>
 
+#include "app/app.h"
 #include "core/input.h"
 #include "xdk/hle.h"
 #include "xdk/layout.h"
@@ -22,6 +27,43 @@ namespace {
 // XPP device type records: CurrentConnected, ChangeConnected, PreviousConnected
 constexpr uint32_t kGamepadType = SYM(XPP_GamepadType);
 constexpr uint32_t kMemoryUnitType = SYM(XPP_MemoryUnitType);
+
+// Developer console bridge: commands typed in the F1 overlay are run here, on
+// the guest thread, through the game's own console processor.
+X86_EXTERN_FUNC(GUEST_ORIG(console_update_hook));
+X86_EXTERN_FUNC(GUEST_ORIG(console_process_command));
+X86_EXTERN_FUNC(GUEST_ORIG(console_open));
+
+X86_FUNC(GUEST(console_update_hook)) {
+    static bool first = true;
+    if (first) {
+        first = false;
+        if (const char* e = std::getenv("XBE_CONSOLE_CMD"); e && *e) app::QueueConsoleCommand(e);
+    }
+    std::string cmd;
+    for (int n = 0; n < 8 && app::TakeConsoleCommand(cmd); ++n) {
+        // console_process_command copies a fixed 255-byte record from this
+        // pointer, so the buffer must be that large and zero filled.
+        uint32_t ptr = mem::AllocSystem(256);
+        std::memset(HostPtr(ptr), 0, 256);
+        std::memcpy(HostPtr(ptr), cmd.c_str(), std::min<size_t>(cmd.size(), 255));
+        uint32_t esp = ctx.esp;
+        ctx.esi = ptr;        // the recompiled body takes the command in ESI
+        X86_PUSH32(1u);       // final argument (bool)
+        X86_PUSH32(ptr);      // const char* command
+        X86_PUSH32(0u);       // return address
+        GUEST_ORIG(console_process_command)(ctx, base);
+        ctx.esp = esp;
+        LOGR("console: ran '%s'", cmd.c_str());
+    }
+    if (app::TakeConsoleOpen()) {
+        uint32_t esp = ctx.esp;
+        X86_PUSH32(0u);
+        GUEST_ORIG(console_open)(ctx, base);
+        ctx.esp = esp;
+    }
+    GUEST_ORIG(console_update_hook)(ctx, base);
+}
 
 std::mutex g_ports_lock;
 bool g_poller = false;

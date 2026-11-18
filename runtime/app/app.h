@@ -91,6 +91,12 @@ void DrawOverlay();
 void OverlayInit();  // the fonts, after ImGui's context and before a renderer's first frame
 // a key pressed while the overlay waits for one to bind (window thread); true takes it
 bool OverlayKey(uint16_t vk);
+// Developer console (F1's Console page): the host queues a command and the title's
+// console_update hook runs it through console_process_command on the guest thread.
+void QueueConsoleCommand(const std::string& command);
+bool TakeConsoleCommand(std::string& command);
+void QueueConsoleOpen();
+bool TakeConsoleOpen();
 
 Settings& Get();
 void Load();
