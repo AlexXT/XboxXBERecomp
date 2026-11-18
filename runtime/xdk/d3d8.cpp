@@ -609,6 +609,10 @@ bool MakeFrameBuffers(uint32_t pp) {
         constexpr uint32_t kMiniportSize = 0x800000;
         uint32_t mp = mem::AllocSystem(kMiniportSize);
         std::memset(HostPtr(mp), 0, kMiniportSize);
+        // The guest polls a status bit at miniport+0x1400 before it will leave
+        // its shader/material setup loop. There is no real NV2A here to clear
+        // it, so present it as permanently ready.
+        W32(mp + 0x1400, 0x01000000u);
         W32(kDevice + XDK_CDevice_Miniport, mp);
     }
     if (XDK_CDevice_FrameSurfaces == xdk::kUnknown) {
