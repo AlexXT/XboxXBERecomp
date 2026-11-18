@@ -44,6 +44,8 @@ std::vector<std::pair<const char*, const char*>> g_quick_commands = {
     {"main_menu", "main_menu"}, {"map_reset", "map_reset"}, {"version", "version"},
     {"jetpack", "cheat_jetpack 1"}, {"all weapons", "cheat_all_weapons"},
 };
+std::vector<std::string> g_console_lines;
+bool g_console_display_supported = true;
 // a key binding waiting for its key: the input and the slot, -1 none
 std::atomic<int> g_bind_control{-1}, g_bind_slot{0};
 
@@ -821,16 +823,29 @@ void SetConsoleQuickCommands(std::vector<std::pair<const char*, const char*>> cm
     g_quick_commands = std::move(cmds);
 }
 
+void AddConsoleLine(const std::string& line) {
+    std::lock_guard<std::mutex> lock(g_console_lock);
+    g_console_lines.push_back(line);
+    if (g_console_lines.size() > 200) g_console_lines.erase(g_console_lines.begin());
+}
+const std::vector<std::string>& ConsoleLines() { return g_console_lines; }
+void SetConsoleDisplaySupported(bool supported) { g_console_display_supported = supported; }
+
 void Console(Settings&) {
     Section("Developer console");
-    Note("Runs commands through the game's own console. Output is printed to assets\\debug.txt.");
+    Note("Runs commands through the game's own console; its output appears below.");
+    ImGui::BeginChild("console output", ImVec2(0, 160), true, ImGuiWindowFlags_HorizontalScrollbar);
+    for (const std::string& l : ConsoleLines()) ImGui::TextUnformatted(l.c_str());
+    ImGui::EndChild();
     static char line[256] = {};
     if (ImGui::InputText("command", line, sizeof(line), ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::Button("Run")) {
         if (line[0]) QueueConsoleCommand(line);
         line[0] = 0;
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Open display")) QueueConsoleOpen();
+    if (g_console_display_supported) {
+        ImGui::SameLine();
+        if (ImGui::Button("Open display")) QueueConsoleOpen();
+    }
     Note("Quick commands:");
     int column = 0;
     for (auto& [label, command] : g_quick_commands) {

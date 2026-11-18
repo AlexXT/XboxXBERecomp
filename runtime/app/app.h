@@ -105,6 +105,11 @@ void QueueConsoleOpen();
 bool TakeConsoleOpen();
 // F1 Console page quick-command buttons, label -> command; replaces the defaults
 void SetConsoleQuickCommands(std::vector<std::pair<const char*, const char*>> cmds);
+// Captured engine console lines, shown in the F1 Console page
+void AddConsoleLine(const std::string& line);
+const std::vector<std::string>& ConsoleLines();
+// Some console-less title builds have no engine console window to open
+void SetConsoleDisplaySupported(bool supported);
 
 Settings& Get();
 void Load();
