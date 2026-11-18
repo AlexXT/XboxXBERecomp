@@ -113,6 +113,25 @@ constexpr const char* kLabels[kControls] = {
     "Left stick left", "Left stick right", "Left stick up", "Left stick down",
     "Right stick left", "Right stick right", "Right stick up", "Right stick down"};
 
+// a stick by the settings (Settings::stick_deadzone, stick_sensitivity): a round dead zone, the throw past it stretched
+// to the full range, then the sensitivity. A game with its own dead zone on each axis (GameInfo::stick_deadzone) reads
+// nothing inside it: the sensitivity scales each axis's throw past it, so a lower one still moves (NightFire's 30% on
+// foot swallowed all of a stick at 30% sensitivity) and the game's speed changes in proportion.
+void TuneStick(float& x, float& y, uint32_t deadzone, uint32_t sensitivity, float game_deadzone) {
+    float m = std::hypot(x, y), dz = deadzone / 100.0f;
+    if (m <= dz) {
+        x = y = 0;
+        return;
+    }
+    float r = std::min(m, 1.0f);  // a square gate's corners read past 1 and keep their full throw
+    float k = (r - dz) / (1 - dz) / r, sens = sensitivity / 100.0f, g = std::clamp(game_deadzone, 0.0f, 0.9f);
+    for (float* a : {&x, &y}) {
+        float v = std::fabs(*a * k);
+        if (v > g) v = g + (v - g) * sens;
+        *a = std::copysign(std::min(v, 1.0f), *a);
+    }
+}
+
 // a pad's inputs as 0 to 1 each, in Control order
 void ReadPad(SDL_Gamepad* pad, float* v) {
     constexpr SDL_GamepadButton kButtons[] = {
@@ -258,6 +277,14 @@ Pad Poll(int port) {
             p.connected = true;
             ReadPad(pad, in);
         }
+    }
+    // the controller's sticks by the settings, before the remap (the keyboard and the wheel are added after)
+    for (int i = 0; i < 2; i++) {
+        if (s.stick_deadzone[i] == 0 && s.stick_sensitivity[i] == 100) continue;
+        float* v = in + (i ? kRSLeft : kLSLeft);  // left, right, up, down
+        float x = v[1] - v[0], y = v[3] - v[2];
+        TuneStick(x, y, s.stick_deadzone[i], s.stick_sensitivity[i], app::kGame.stick_deadzone);
+        v[0] = std::max(-x, 0.0f), v[1] = std::max(x, 0.0f), v[2] = std::max(-y, 0.0f), v[3] = std::max(y, 0.0f);
     }
     // remapped: each console input reads the physical input the settings name for it
     for (int c = 0; c < kControls; c++) {
