@@ -606,7 +606,7 @@ bool MakeFrameBuffers(uint32_t pp) {
     // the library's inline code indexes through it (vblank, field, gamma, mode).
     // HLE replaces that init, so mirror the pointer with a zeroed block.
     if (XDK_CDevice_Miniport != xdk::kUnknown && !R32(kDevice + XDK_CDevice_Miniport)) {
-        constexpr uint32_t kMiniportSize = 0x4000;
+        constexpr uint32_t kMiniportSize = 0x800000;
         uint32_t mp = mem::AllocSystem(kMiniportSize);
         std::memset(HostPtr(mp), 0, kMiniportSize);
         W32(kDevice + XDK_CDevice_Miniport, mp);
