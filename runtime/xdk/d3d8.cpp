@@ -167,19 +167,6 @@ constexpr uint32_t kStageStates = XDK_TextureState_Stage, kStreamSize = XDK_Stre
 
 gpu::State g_state;
 std::unique_ptr<gpu::Backend> g_backend;
-static uint32_t g_miniport = 0;  // mirrored XDK miniport object, status words below
-
-// The guest polls shadowed GPU status while setting up shaders/materials. There
-// is no NV2A here to change it, so keep presenting the "work done" state.
-static void RefreshMiniport(uint32_t mp) {
-    if (!mp) return;
-    W32(mp + 0x1400, 0x01000000u);
-    W32(mp + 0x4514, 0x10u);
-    W32(mp + 0x4520, 0u);
-    W32(mp + 0x3800, 0u);
-    W32(mp + 0x3400, 1u);
-    W32(mp + 0x4550, 0u);
-}
 std::recursive_mutex g_lock;
 
 std::unordered_map<uint32_t, std::shared_ptr<gpu::VertexShader>> g_vs;
@@ -622,26 +609,7 @@ bool MakeFrameBuffers(uint32_t pp) {
         constexpr uint32_t kMiniportSize = 0x800000;
         uint32_t mp = mem::AllocSystem(kMiniportSize);
         std::memset(HostPtr(mp), 0, kMiniportSize);
-        // The guest polls a status bit at miniport+0x1400 before it will leave
-        // its shader/material setup loop. There is no real NV2A here to clear
-        // it, so present it as permanently ready.
-        W32(mp + 0x1400, 0x01000000u);
-        // The guest's shader-setup helpers poll status words in the object at
-        // miniport+0x1300. Seed the bits their loops wait on ("work done", no
-        // pending flush) so an absent GPU cannot hold them forever.
-        W32(mp + 0x4514, 0x10u);   // +0x3214: set
-        W32(mp + 0x4520, 0u);      // +0x3220: clear
-        W32(mp + 0x3800, 0u);      // +0x2500: clear
-        W32(mp + 0x3400, 1u);      // +0x2100: a nonzero state
-        W32(mp + 0x4550, 0u);      // +0x3250: clear
-        g_miniport = mp;
         W32(kDevice + XDK_CDevice_Miniport, mp);
-        std::thread([mp] {
-            for (;;) {
-                RefreshMiniport(mp);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-        }).detach();
     }
     if (XDK_CDevice_FrameSurfaces == xdk::kUnknown) {
         SetDev(kDevBackBuffer, g_buffers[1]);
@@ -1161,9 +1129,6 @@ uint32_t SwapFrame(X86Context& ctx, uint32_t swap_flags) {
         }
     }
     Walk(Dev(kDevPush));  // reports asked for at the end of the frame
-    // Advance the guest's shadowed GPU status every frame. Without hardware to
-    // raise these, its shader-setup loops would wait on them forever.
-    RefreshMiniport(g_miniport);
     if (g_backend) {
         gpu::Surface front = SurfaceOf(g_buffers[1]);
         front.blend = g_frame_blend.exchange(1);
