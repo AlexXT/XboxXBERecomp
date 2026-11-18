@@ -797,6 +797,8 @@ void QueueConsoleCommand(const std::string& command) {
     if (command.empty()) return;
     std::lock_guard<std::mutex> lock(g_console_lock);
     g_console_commands.push_back(command);
+    g_console_lines.push_back("> " + command);
+    if (g_console_lines.size() > 200) g_console_lines.erase(g_console_lines.begin());
 }
 
 bool TakeConsoleCommand(std::string& command) {
@@ -828,15 +830,16 @@ void AddConsoleLine(const std::string& line) {
     g_console_lines.push_back(line);
     if (g_console_lines.size() > 200) g_console_lines.erase(g_console_lines.begin());
 }
+void ClearConsoleLines() {
+    std::lock_guard<std::mutex> lock(g_console_lock);
+    g_console_lines.clear();
+}
 const std::vector<std::string>& ConsoleLines() { return g_console_lines; }
 void SetConsoleDisplaySupported(bool supported) { g_console_display_supported = supported; }
 
 void Console(Settings&) {
     Section("Developer console");
-    Note("Runs commands through the game's own console; its output appears below.");
-    ImGui::BeginChild("console output", ImVec2(0, 160), true, ImGuiWindowFlags_HorizontalScrollbar);
-    for (const std::string& l : ConsoleLines()) ImGui::TextUnformatted(l.c_str());
-    ImGui::EndChild();
+    Note("Runs commands through the game's own console. Output appears below.");
     static char line[256] = {};
     if (ImGui::InputText("command", line, sizeof(line), ImGuiInputTextFlags_EnterReturnsTrue) || ImGui::Button("Run")) {
         if (line[0]) QueueConsoleCommand(line);
@@ -852,6 +855,13 @@ void Console(Settings&) {
         if (column++ % 3) ImGui::SameLine();
         if (ImGui::Button(label)) QueueConsoleCommand(command);
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear output")) ClearConsoleLines();
+    Note("Output:");
+    ImGui::BeginChild("console output", ImVec2(0, 180), true, ImGuiWindowFlags_HorizontalScrollbar);
+    for (const std::string& l : ConsoleLines()) ImGui::TextUnformatted(l.c_str());
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4) ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
 }
 
 bool OverlayOpen() { return g_open; }
