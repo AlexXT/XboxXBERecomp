@@ -5,11 +5,31 @@ include_guard(GLOBAL)
 # belong to one build. A change in the renderer, in the recompiled code or in the driver makes them stale, and a
 # stale pipeline is worse than none: it draws the wrong thing or crashes. So every build starts without them.
 function(xbe_clear_caches target)
+    # The shader and pipeline caches belong to the build that made them. So does the
+    # title's own map cache on the emulated hard disk: a title killed while writing
+    # hdd/Z/cacheNNN.map (a crash, or a debug assert) leaves a partial cache file
+    # that the next run would reuse. Clear both on every build, for every instance
+    # of the hard disk (hdd, hdd2, ...) and for the launcher's play folder.
+    set(script "${CMAKE_CURRENT_BINARY_DIR}/clear_caches_${target}.cmake")
+    file(WRITE "${script}" "
+file(GLOB caches
+    \"\${DIR}/shadercache.bin\"
+    \"\${DIR}/pipelinecache.bin\"
+    \"\${DIR}/hdd*/Z/cache*.map\"
+    \"\${DIR}/play/hdd*/Z/cache*.map\"
+    \"\${DIR}/hdd*/E/CACHE/*\"
+    \"\${DIR}/play/hdd*/E/CACHE/*\"
+    \"\${DIR}/hdd*/C/CACHE/*\"
+    \"\${DIR}/play/hdd*/C/CACHE/*\")
+if(caches)
+    list(LENGTH caches count)
+    message(STATUS \"clearing \${count} stale cache file(s) of the build that made them\")
+    file(REMOVE \${caches})
+endif()
+")
     add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -f
-                "$<TARGET_FILE_DIR:${target}>/shadercache.bin"
-                "$<TARGET_FILE_DIR:${target}>/pipelinecache.bin"
-        COMMENT "clearing the shader and pipeline caches: they belong to the build that made them"
+        COMMAND ${CMAKE_COMMAND} "-DDIR=$<TARGET_FILE_DIR:${target}>" -P "${script}"
+        COMMENT "clearing the shader, pipeline and map caches: they belong to the build that made them"
         VERBATIM)
 endfunction()
 
