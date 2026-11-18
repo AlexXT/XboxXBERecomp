@@ -299,6 +299,25 @@ uint32_t NewSurface(uint32_t w, uint32_t h, uint32_t fmt, uint32_t bpp, uint32_t
     return hdr;
 }
 
+// the pixel shader a handle names: a record the host made for CreatePixelShader, or the title's own PixelShader
+// object (RefCount, D3DOwned, pPSDef); its definition is compiled here
+std::shared_ptr<gpu::PixelShader> PixelShaderFromHandle(uint32_t h) {
+    if (!h) return nullptr;
+    if (auto it = g_ps.find(h); it != g_ps.end()) return it->second;
+    if (XDK_PixelShader_Definition == xdk::kUnknown) return nullptr;
+    uint32_t def = R32(h + XDK_PixelShader_Definition);
+    if (!def) return nullptr;
+    static std::unordered_map<uint32_t, std::shared_ptr<gpu::PixelShader>> made;
+    auto& ps = made[h];
+    const void* p = HostPtr(def);
+    if (!ps || std::memcmp(ps->def, p, sizeof(ps->def))) {
+        ps = std::make_shared<gpu::PixelShader>();
+        std::memcpy(ps->def, p, sizeof(ps->def));
+    }
+    ps->handle = h;
+    return ps;
+}
+
 void SyncDeferred() {
     // deferred states live in the title's memory, the inline SetRenderState and SetTextureStageState write them
     const auto& n = xdk::states::kNumbering;
@@ -307,6 +326,16 @@ void SyncDeferred() {
     for (int s = 0; s < 4; s++)
         for (uint32_t i = 0; i < gpu::kTssBumpEnvMat00; i++)
             g_state.tss[s][i] = R32(kTextureState + (s * kStageStates + n.tss[i]) * 4);
+    // the device's pixel shader: the library's own SetPixelShader stores it, and titles that inline that function
+    // write the same field, so it is the one thing that says what the draw samples with
+    if (XDK_CDevice_PixelShader != xdk::kUnknown) {
+        static uint32_t last = ~0u;
+        uint32_t h = Dev(XDK_CDevice_PixelShader);
+        if (h != last) {
+            last = h;
+            g_state.ps = PixelShaderFromHandle(h);
+        }
+    }
     // a vertex stream over a target the GPU drew is read back first, as the console's vertices read that memory
     // (NightFire's scope colours 16384 points from a 128x128 swizzled target a pass before drew)
     if (g_backend)
@@ -1737,6 +1766,10 @@ HLE_STDCALL(D3DDevice_CreatePixelShader, 2) {
     std::memcpy(ps->def, HostPtr(a[0]), sizeof(ps->def));
     uint32_t rec = mem::AllocSystem(16, 16);
     ps->handle = rec;
+    // the guest object the title sees: RefCount, D3DOwned, pPSDef (its own code reads the last)
+    W32(rec + 0x0, 1);
+    W32(rec + 0x4, 1);
+    if (XDK_PixelShader_Definition != xdk::kUnknown) W32(rec + XDK_PixelShader_Definition, a[0]);
     g_ps[rec] = ps;
     W32(a[1], rec);
     return 0;
@@ -1751,26 +1784,10 @@ HLE_STDCALL(D3DDevice_DeletePixelShader, 1) {
 HLE_STDCALL(D3DDevice_SetPixelShader, 1) {
     WalkBeforeState();
     std::lock_guard<std::recursive_mutex> lock(g_lock);
-    g_state.ps = nullptr;
-    if (!a[0]) return 0;
-    auto it = g_ps.find(a[0]);
-    if (it != g_ps.end()) {
-        g_state.ps = it->second;
-    } else if (XDK_PixelShader_Definition != xdk::kUnknown) {
-        // made by library code the title inlined: the object points at its definition, handles are reused
-        static std::unordered_map<uint32_t, std::shared_ptr<gpu::PixelShader>> made;
-        const void* def = HostPtr(R32(a[0] + XDK_PixelShader_Definition));
-        auto& ps = made[a[0]];
-        if (!ps || std::memcmp(ps->def, def, sizeof(ps->def))) {
-            ps = std::make_shared<gpu::PixelShader>();
-            ps->handle = a[0];
-            std::memcpy(ps->def, def, sizeof(ps->def));
-        }
-        g_state.ps = ps;
-    } else {
-        LOG_FIRST(8, "d3d: SetPixelShader with unknown handle %08X", a[0]);
-        return 0;
-    }
+    g_state.ps = PixelShaderFromHandle(a[0]);
+    // the library stores the handle in the device: the title's own code and GetPixelShader read it back
+    if (XDK_CDevice_PixelShader != xdk::kUnknown) SetDev(XDK_CDevice_PixelShader, a[0]);
+    if (!g_state.ps) return 0;
     // the definition loads the combiner state like the XDK pushes it
     const uint32_t* d = g_state.ps->def;
     auto put = [&](uint32_t method, uint32_t v) { g_state.simple[method >> 2] = v; };
@@ -1792,6 +1809,18 @@ HLE_STDCALL(D3DDevice_SetPixelShader, 1) {
     put(gpu::kMPsInputTexture, d[56]);
     SetComplex(gpu::kRsPsTextureModes, d[54]);
     return 0;
+}
+
+// (pPSDef): the library makes a PixelShader around the definition, points the device at it and calls SetPixelShader.
+// A title that inlines the library still ends up here: the host only needs the definition.
+HLE_WRAP(D3DDevice_SetPixelShaderProgram, 1) {
+    std::lock_guard<std::recursive_mutex> lock(g_lock);
+    g_state.ps = nullptr;
+    if (a[0]) {
+        auto ps = std::make_shared<gpu::PixelShader>();
+        std::memcpy(ps->def, HostPtr(a[0]), sizeof(ps->def));
+        g_state.ps = ps;
+    }
 }
 
 HLE_STDCALL(D3DDevice_SetPixelShaderConstant, 3) {
@@ -2217,11 +2246,77 @@ void EndPrimitive() {
     g_state.vs_handle = handle;
 }
 
+// D3DDevice_SetTexture in the image's own D3D never reaches the host: the library pushes the console's texture methods
+// instead, the stage's data address and format word, then a linear texture's pitch and rectangle, and CONTROL0 = 0 when
+// the stage is given no texture. The renderer reads a D3DBaseTexture (Common, Data, Lock, Format, Size), so the pushed
+// fields are kept in one made here.
+struct PushedTexture {
+    uint32_t header = 0;             // guest D3DBaseTexture describing the stage's pushed state
+    uint32_t data = 0;               // SET_TEXTURE_OFFSET: the image's physical address
+    uint32_t format = 0;             // SET_TEXTURE_FORMAT: the D3DPixelContainer format word
+    uint32_t pitch = 0;              // SET_TEXTURE_CONTROL1: a linear image's pitch in bytes
+    uint32_t width = 1, height = 1;  // SET_TEXTURE_IMAGE_RECT: its width and height
+    bool rect = false;               // the library pushes them only for a texture with a Size (a linear one)
+};
+PushedTexture g_pushed_tex[4];
+uint32_t g_pushed_palette[4];
+
+void UpdatePushedTexture(uint32_t stage) {
+    PushedTexture& t = g_pushed_tex[stage];
+    if (!t.header) {
+        t.header = mem::AllocSystem(24);
+        W32(t.header + 8, 0);  // Lock
+        W32(t.header + 20, 0);
+    }
+    W32(t.header + 0, 0x00040001);  // a texture, one reference
+    W32(t.header + 4, t.data);
+    W32(t.header + 12, t.format);
+    // a swizzled or compressed image is described by its format word (log2 sizes in it), a linear one by its rectangle:
+    // the library pushes the rectangle only when the texture has a Size, which a linear one always does
+    const gpu::FormatInfo& f = gpu::Format((t.format >> 8) & 0xFF);
+    uint32_t size = 0;
+    if (t.rect && t.pitch >= 64 && !f.swizzled && !f.compressed)
+        size = ((t.width - 1) & 0xFFF) | (((t.height - 1) & 0xFFF) << 12) | (((t.pitch / 64 - 1) & 0xFF) << 24);
+    W32(t.header + 16, size);
+    g_state.textures[stage] = t.header;
+}
+
+void PushedTextureMethod(uint32_t m, uint32_t v) {
+    uint32_t rel = m - 0x1B00, stage = rel >> 6, field = rel & 0x3F;
+    if (stage > 3) return;
+    PushedTexture& t = g_pushed_tex[stage];
+    switch (field) {
+        case 0x00: t.data = v; break;                    // NV097_SET_TEXTURE_OFFSET
+        case 0x04: t.format = v; break;                  // NV097_SET_TEXTURE_FORMAT
+        case 0x0C:                                       // NV097_SET_TEXTURE_CONTROL0
+            if (!v) {                                    // the unit disabled: the stage has no texture
+                g_state.textures[stage] = 0;
+                return;
+            }
+            break;
+        case 0x10: t.pitch = (v >> 16) & 0xFFFF; break;  // NV097_SET_TEXTURE_CONTROL1: IMAGE_PITCH
+        case 0x1C:                                       // NV097_SET_TEXTURE_IMAGE_RECT
+            t.width = std::max<uint32_t>((v >> 16) & 0xFFFF, 1);
+            t.height = std::max<uint32_t>(v & 0xFFFF, 1);
+            t.rect = true;
+            break;
+        case 0x20: {  // NV097_SET_TEXTURE_PALETTE: Data | paletteset (bit 0 the DMA, bits 2 and 3 the size code)
+            uint32_t& header = g_pushed_palette[stage];
+            if (!header) header = mem::AllocSystem(24);
+            W32(header + 0, ((v >> 2) & 3) << 30);  // D3DPalette Common: the size code in the top two bits
+            W32(header + 4, v & ~0x3Fu);            // Data: the colours' physical address
+            g_state.palettes[stage] = header;
+            return;
+        }
+        default: return;
+    }
+    UpdatePushedTexture(stage);
+}
+
 // reads the commands pushed since the last call: vertex data between a begin and an end is drawn, visibility tests
 // are run, vertex shader constants are loaded, the rest is skipped
 void Walk(uint32_t end) {
-    SeedSimpleDefaults();
-    if (!g_walk || end < g_walk || end > g_walk_limit) return;
+    SeedSimpleDefaults();    if (!g_walk || end < g_walk || end > g_walk_limit) return;
     for (uint32_t p = g_walk; p + 4 <= end;) {
         // count in bits 18 to 28, bit 30 keeps the method for every value
         uint32_t head = R32(p), method = head & 0x1FFC, n = (head >> 18) & 0x7FF;
@@ -2261,6 +2356,10 @@ void Walk(uint32_t end) {
                     FrameLogDraw(g_im_prim, v & 0xFFFFFF, (v >> 24) + 1, nullptr);
                     g_backend->Draw(g_state, g_im_prim, v & 0xFFFFFF, (v >> 24) + 1, nullptr);
                 }
+                continue;
+            }
+            if (m >= 0x1B00 && m < 0x1BC0) {  // the console's texture methods for the four stages
+                PushedTextureMethod(m, v);
                 continue;
             }
             if (m == 0x17FC) {  // begin/end, 0 ends

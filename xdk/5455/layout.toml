@@ -12,6 +12,7 @@ CDevice_Time              = 0x2C    # D3D_SetFence pushes it
 CDevice_Flags             = 0x8     # Direct3D_CreateDevice ors the behaviour flags into it
 CDevice_PixelShader       = 0x36C   # D3DDevice_SetPixelShader stores the handle
 CDevice_VertexShader      = 0x370   # D3DDevice_SetPixelShader tests it
+PixelShader_Definition    = 0x8     # D3DDevice_SetPixelShader 0x33C460 reads [handle+8] (RefCount, D3DOwned, pPSDef)
 CDevice_SuperSampleX      = 0x544   # the viewport push scales viewport X by it
 CDevice_SuperSampleY      = 0x548
 CDevice_Transforms        = 0x840   # D3DDevice_SetTransform copies 16 dwords to +0x840 + type * 64
@@ -51,8 +52,9 @@ XPP_Previous              = 0x8    # the state before the last poll
 # the DirectSound stream object: its two vtable pointers
 CDirectSoundStream_Vtable = 0x0    # the CDirectSoundStream vtable
 CDirectSoundStream_Vtable2 = 0x4   # the XMediaObject vtable
-# the per-stage texture state array: [stage * 4 + type] dwords
-TextureState_Stage        = 4
+# the per-stage texture state array: D3D__TextureState[D3DTSS_MAXSTAGES][D3DTSS_MAX], so [stage * 32 + type] dwords
+# (D3DDevice_SetTextureStageStateNotInline 0x334866 scales the stage by 0x80 bytes with `shl edx, 5`)
+TextureState_Stage        = 32
 # the stream table: [n * 12], the stride at +0, the buffer at +8
 Stream_Size               = 12
 Stream_Stride             = 0x0
