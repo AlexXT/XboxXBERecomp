@@ -506,7 +506,53 @@ uint32_t SimpleState(const State& s, uint32_t method) {
 }
 
 
+// XBE_CHECK_VERTS=1: log the actual numbers of any draw whose vertex positions, transforms or vertex constants
+// are non-finite or absurdly large. A one-frame Source "out of bounds" warp is exactly such a value, and the
+// line names the draw and the register so the bad input can be traced back to the guest.
+void CheckVerts(const State& s, const Assembled& a, uint32_t count) {
+    static const bool on = [] {
+        const char* e = std::getenv("XBE_CHECK_VERTS");
+        bool v = e && *e == '1';
+        if (v) LOGR("gpu: XBE_CHECK_VERTS=1, extreme vertex values logged");
+        return v;
+    }();
+    if (!on || !count) return;
+    constexpr float kMax = 1.0e6f;
+    auto bad = [](float v) { return !std::isfinite(v) || std::fabs(v) > kMax; };
+
+    // vertex positions, from the converted vertices the backend reads
+    const int regs = std::popcount(uint32_t(a.regs));
+    if (!a.vertices.empty() && (a.regs & 1) && regs >= 3) {
+        uint32_t n = std::min<uint32_t>(count, a.vertex_count);
+        for (uint32_t i = 0; i < n; i++) {
+            const float* p = reinterpret_cast<const float*>(&a.vertices[size_t(i) * regs * 4]);
+            if (bad(p[0]) || bad(p[1]) || bad(p[2])) {
+                LOGW("vert: draw vs %08X ps %08X n %u v %u pos %.9g %.9g %.9g",
+                     s.vs_handle, s.ps ? s.ps->handle : 0u, count, i, p[0], p[1], p[2]);
+                break;
+            }
+        }
+    }
+    for (uint32_t t : {2u, 3u, 16u, 17u, 18u, 19u, 256u, 257u, 258u, 259u}) {
+        const auto& m = s.transforms[t];
+        for (uint32_t j = 0; j < 16; j++)
+            if (bad(m[j])) {
+                LOGW("vert: draw vs %08X transform %u [%u] = %.9g", s.vs_handle, t, j, m[j]);
+                break;
+            }
+    }
+    for (size_t b = 0; b < s.vsc.size(); b++) {
+        const auto& v = s.vsc[b];
+        for (size_t j = 0; j < 4; j++)
+            if (bad(v[j])) {
+                LOGW("vert: draw vs %08X vsc %zu [%zu] = %.9g", s.vs_handle, b, j, v[j]);
+                break;
+            }
+    }
+}
+
 DrawShaders ClassifyShaders(const State& s, const Assembled& a, uint32_t count) {
+    CheckVerts(s, a, count);
     DrawShaders sh;
     // a shader made from a declaration alone (no program) is the fixed function pipeline on those inputs
     sh.prog = (s.vs_handle & 1) && s.vs && !s.vs->program.empty();
