@@ -1,6 +1,7 @@
 // XAPI functions that talk to hardware: controller ports and the hard disk cache partition
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -27,6 +28,40 @@ namespace {
 // XPP device type records: CurrentConnected, ChangeConnected, PreviousConnected
 constexpr uint32_t kGamepadType = SYM(XPP_GamepadType);
 constexpr uint32_t kMemoryUnitType = SYM(XPP_MemoryUnitType);
+
+// The camera-effect (shake/recoil) matrix occasionally comes back full of NaN
+// on this debug build when firing a weapon. render_camera_build multiplies the
+// observer matrix by it, so the NaN becomes the camera's forward/up axes and
+// trips the render_cameras.cpp #310 assert (black screen with skip-asserts).
+// A NaN shake matrix means "no valid effect", so substitute the identity matrix.
+// real_matrix4x3 = { scale, forward[3], up[3], right[3], position[3] } (13 floats).
+X86_EXTERN_FUNC(GUEST_ORIG(player_effect_get_camera_effect_matrix));
+X86_FUNC(GUEST(player_effect_get_camera_effect_matrix)) {
+    uint32_t out = R32(ctx.esp + 8);
+    GUEST_ORIG(player_effect_get_camera_effect_matrix)(ctx, base);
+    if (!out) return;
+    bool bad = false;
+    for (int i = 0; i < 13; ++i) {
+        uint32_t b;
+        std::memcpy(&b, HostPtr(out + i * 4), 4);
+        float v;
+        std::memcpy(&v, &b, 4);
+        if (!std::isfinite(v)) { bad = true; break; }
+    }
+    if (bad) {
+        static uint32_t fixed = 0;
+        if (++fixed <= 3) LOGR("camfx: NaN shake matrix, substituting identity (#%u)", fixed);
+        // identity: scale=1, forward=(1,0,0), up=(0,1,0), right=(0,0,1), pos=(0,0,0)
+        static constexpr uint32_t kIdentity[13] = {
+            0x3F800000u,
+            0x3F800000u, 0u, 0u,
+            0u, 0x3F800000u, 0u,
+            0u, 0u, 0x3F800000u,
+            0u, 0u, 0u
+        };
+        for (int i = 0; i < 13; ++i) std::memcpy(HostPtr(out + i * 4), &kIdentity[i], 4);
+    }
+}
 
 // Developer console bridge: commands typed in the F1 overlay are run here, on
 // the guest thread, through the game's own console processor. Only titles whose
