@@ -274,6 +274,10 @@ struct GameInfo {
     // the title draws its world a few vertices at a time with nothing changed between (Agent Under Fire: thousands of draws a
     // frame, nine in ten alike): those runs reach the renderer as one draw, each costing its time per draw (render_thread.cpp)
     bool merge_draws = false;
+    // draw on the render thread, which reads guest vertex memory when a draw runs (the title's fences are meant to wait
+    // for that). Off for titles that reuse a vertex buffer before that read, which shows as a one-frame warp of stray
+    // triangles (retail Xbox HL2). XBE_RENDER_THREAD still overrides it.
+    bool threaded_render = true;
     // the aspect setting's "from the screen's shape" follows an ultrawide screen instead of stopping at 16:9
     bool auto_fills_screen = false;
     // the title's 3D views follow FrameAspect when it changes (PGR2 reshapes its cameras): in a widescreen boot, a choice

@@ -137,7 +137,7 @@ namespace {
 bool RenderThread() {
     static const bool on = [] {
         const char* e = std::getenv("XBE_RENDER_THREAD");
-        bool v = e && *e ? *e != '0' : XBE_RENDER_THREAD;
+        bool v = e && *e ? *e != '0' : (XBE_RENDER_THREAD && app::kGame.threaded_render);
         if (e && *e) LOGR("d3d: render thread %s (XBE_RENDER_THREAD)", v ? "on" : "off");
         return v;
     }();
