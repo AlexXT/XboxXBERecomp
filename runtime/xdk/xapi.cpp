@@ -103,6 +103,24 @@ X86_FUNC(GUEST(console_update_hook)) {
 }
 #endif  // HAS_console_*
 
+// The game routes finished console lines (console_printf, cseries_errors) through
+// write_to_error_file(char* text, bool). Mirror them into the F1 Console page so
+// it shows live output next to the "> command" input lines, like HL2's TraceMsg.
+#if HAS_console_output_hook
+X86_EXTERN_FUNC(GUEST_ORIG(console_output_hook));
+X86_FUNC(GUEST(console_output_hook)) {
+    uint32_t p = R32(ctx.esp + 4);
+    GUEST_ORIG(console_output_hook)(ctx, base);
+    if (!p) return;
+    const char* s = static_cast<const char*>(HostPtr(p));
+    if (!s) return;
+    std::string line(s);
+    while (!line.empty() && (line.back() == ' ' || line.back() == '\n' || line.back() == '\r'))
+        line.pop_back();
+    if (!line.empty()) app::AddConsoleLine(line);
+}
+#endif  // HAS_console_output_hook
+
 std::mutex g_ports_lock;
 bool g_poller = false;
 uint32_t g_wheels = 0;  // ports a steering wheel steers, as XInputGetCapabilities last told
