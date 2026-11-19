@@ -47,7 +47,9 @@ uint32_t GuestPitch(uint32_t width);       // bytes per row of a 32 bit surface 
 TexKind TextureKind(const TextureDesc& d);
 
 // SurfaceSig: a surface's bytes hashed, up to kSigWholeMax whole, a bigger one as evenly spaced samples
-constexpr uint32_t kSigWholeMax = 65536;
+// Font pages and other small dynamic textures are a few hundred KB; sampled
+// signatures miss single-glyph writes in them, so checksum them whole.
+constexpr uint32_t kSigWholeMax = 262144;
 constexpr uint32_t kSigSamples = 64;
 constexpr uint32_t kSigSampleBytes = 64;
 uint64_t SurfaceSig(uint32_t data, uint32_t total);
