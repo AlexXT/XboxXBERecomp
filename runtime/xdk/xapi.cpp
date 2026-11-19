@@ -121,6 +121,30 @@ X86_FUNC(GUEST(console_output_hook)) {
 }
 #endif  // HAS_console_output_hook
 
+// console_printf formats into a 0x400 stack buffer at [ebp-0x400]. Capture the
+// finished line there so command output (e.g. `version`) shows in the F1 page
+// even when it only goes to the in-game console and not the error log.
+#if HAS_console_printf_hook
+X86_EXTERN_FUNC(GUEST_ORIG(console_printf_hook));
+X86_FUNC(GUEST(console_printf_hook)) {
+    // at entry esp points at the return address; the guest's prologue is
+    // push ebp; mov ebp,esp; sub esp,0x400, so its buffer is [entry_esp-0x404]
+    uint32_t buf = uint32_t(ctx.esp - 0x404);
+    GUEST_ORIG(console_printf_hook)(ctx, base);
+    const char* s = static_cast<const char*>(HostPtr(buf));
+    if (!s) return;
+    std::string line(s);
+    line.resize(std::min<size_t>(line.size(), 0x400));
+    while (!line.empty() && (line.back() == ' ' || line.back() == '\n' || line.back() == '\r'))
+        line.pop_back();
+    if (!line.empty()) {
+        // avoid duplicating a line already captured by the write_to_error_file hook
+        static std::string last;
+        if (line != last) { app::AddConsoleLine(line); last = line; }
+    }
+}
+#endif  // HAS_console_printf_hook
+
 std::mutex g_ports_lock;
 bool g_poller = false;
 uint32_t g_wheels = 0;  // ports a steering wheel steers, as XInputGetCapabilities last told
